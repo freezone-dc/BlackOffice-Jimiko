@@ -1,16 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
-    getAuth, 
-    onAuthStateChanged, 
-    signInWithEmailAndPassword, 
-    updatePassword,
-    sendPasswordResetEmail,
-    signOut,
-    reauthenticateWithCredential,
-    EmailAuthProvider
-} from 'firebase/auth';
-import { 
     getFirestore, 
     collection, 
     addDoc, 
@@ -33,7 +23,6 @@ import {
     uploadBytesResumable, 
     getDownloadURL 
 } from 'firebase/storage';
-// Note: Recharts is a new library, you need to update package.json
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { 
     Home,
@@ -57,12 +46,14 @@ import {
     ChevronLeft,
     ChevronRight,
     UploadCloud,
-    CheckCircle
+    CheckCircle,
+    Eye,
+    EyeOff
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
 const firebaseConfig = {
-  apiKey: "AIzaSyDLP8ZGO0YtzGH17gp60d0M1yyoV-UVVrs",
+  apiKey: "AIzaSyDLP8ZGO0YtzGH17gp60D0MlyyoV-UVVrs",
   authDomain: "blackoffice-jimiko.firebaseapp.com",
   databaseURL: "https://blackoffice-jimiko-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "blackoffice-jimiko",
@@ -76,25 +67,27 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // --- Initialize Firebase ---
 const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
+
+// --- Simple Obfuscation for Passwords (Not for high-security) ---
+// This is a simple way to avoid storing passwords in plain text.
+// It is NOT a secure cryptographic hash.
+const encodePass = (str) => btoa(str);
 
 // --- Helper Functions ---
 const formatCurrency = (amount) => new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB' }).format(amount);
 const formatFullDate = (date) => date ? new Date(date.seconds * 1000).toLocaleString('th-TH') : 'N/A';
-const formatDateForInput = (date) => date ? new Date(date.seconds * 1000).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-
 
 const logAction = async (user, action, details = {}) => {
     try {
         if (!user) return;
         const logData = {
             action,
-            userId: user.uid,
-            userEmail: user.email,
+            userId: user.id,
+            userDisplay: user.displayName,
             timestamp: Timestamp.now(),
-            details: JSON.stringify(details, null, 2) // Pretty print JSON
+            details: JSON.stringify(details, null, 2)
         };
         const logCollectionPath = `/artifacts/${appId}/public/data/logs`;
         await addDoc(collection(db, logCollectionPath), logData);
@@ -119,36 +112,22 @@ function Modal({ isOpen, onClose, children, title }) {
     );
 }
 
-function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confirmText = "ยืนยัน" }) {
-    if (!isOpen) return null;
-    return (
-        <Modal isOpen={isOpen} onClose={onClose} title={title}>
-            <div className="text-center">
-                <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-900 mb-4">
-                    <AlertTriangle className="h-6 w-6 text-red-400" />
-                </div>
-                <p className="text-gray-300 mb-6">{message}</p>
-                <div className="flex justify-center space-x-4">
-                    <button onClick={onClose} className="py-2 px-6 bg-gray-600 text-white rounded-lg hover:bg-gray-500 transition-colors">
-                        ยกเลิก
-                    </button>
-                    <button onClick={onConfirm} className="py-2 px-6 bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors">
-                        {confirmText}
-                    </button>
-                </div>
-            </div>
-        </Modal>
-    );
-}
-
 // --- Main App Component ---
 export default function App() {
-    const [user, setUser] = useState(null);
-    const [userData, setUserData] = useState(null);
+    const [currentUser, setCurrentUser] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
-    const [currentPage, setCurrentPage] = useState('home'); // Changed from 'dashboard'
+    const [currentPage, setCurrentPage] = useState('home');
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
+
+    useEffect(() => {
+        // On app start, check if user data is in sessionStorage
+        const storedUser = sessionStorage.getItem('blackoffice_user');
+        if (storedUser) {
+            setCurrentUser(JSON.parse(storedUser));
+        }
+        setIsLoading(false);
+    }, []);
     
     const showNotification = (message, type = 'success') => {
         setNotification({ show: true, message, type });
@@ -157,45 +136,15 @@ export default function App() {
         }, 4000);
     };
 
-    useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (authUser) => {
-            setIsLoading(true);
-            if (authUser) {
-                const userDocRef = doc(db, 'users', authUser.uid);
-                const unsubDoc = onSnapshot(userDocRef, (docSnap) => {
-                    if (docSnap.exists()) {
-                        const fetchedUserData = { uid: authUser.uid, email: authUser.email, ...docSnap.data() };
-                        setUser(authUser);
-                        setUserData(fetchedUserData);
-                    } else {
-                        console.log("User document not found, creating one:", authUser.uid);
-                        const defaultUserData = {
-                            uid: authUser.uid,
-                            email: authUser.email,
-                            displayName: authUser.email.split('@')[0],
-                            role: 'staff',
-                            photoURL: '',
-                            createdAt: Timestamp.now()
-                        };
-                        setDoc(doc(db, 'users', authUser.uid), defaultUserData);
-                        setUser(authUser);
-                        setUserData(defaultUserData);
-                    }
-                    setIsLoading(false);
-                });
-                return () => unsubDoc();
-            } else {
-                setUser(null);
-                setUserData(null);
-                setIsLoading(false);
-            }
-        });
-        return () => unsubscribe();
-    }, []);
+    const handleLoginSuccess = (userData) => {
+        setCurrentUser(userData);
+        sessionStorage.setItem('blackoffice_user', JSON.stringify(userData));
+    };
 
-    const handleLogout = async () => {
-        await logAction(user, 'logout');
-        await signOut(auth);
+    const handleLogout = () => {
+        logAction(currentUser, 'logout');
+        setCurrentUser(null);
+        sessionStorage.removeItem('blackoffice_user');
         setCurrentPage('home');
     };
     
@@ -208,8 +157,8 @@ export default function App() {
         return <div className="flex items-center justify-center min-h-screen bg-gray-900 text-purple-400"><div className="text-xl font-semibold animate-pulse">กำลังโหลด...</div></div>;
     }
 
-    if (!user) {
-        return <AuthPage />;
+    if (!currentUser) {
+        return <AuthPage onLoginSuccess={handleLoginSuccess} />;
     }
 
     return (
@@ -222,21 +171,21 @@ export default function App() {
             <Sidebar 
                 currentPage={currentPage} 
                 navigateTo={navigateTo}
-                userRole={userData?.role}
+                userRole={currentUser?.role}
                 isSidebarOpen={isSidebarOpen}
                 setIsSidebarOpen={setIsSidebarOpen}
             />
             <div className="flex-1 flex flex-col overflow-hidden">
                 <Header 
-                    userData={userData}
+                    userData={currentUser}
                     handleLogout={handleLogout} 
                     setIsSidebarOpen={setIsSidebarOpen}
                 />
                 <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-900 p-4 sm:p-6 lg:p-8">
                     <PageContent 
                         page={currentPage} 
-                        user={user} 
-                        userData={userData} 
+                        user={currentUser} 
+                        userData={currentUser} 
                         showNotification={showNotification}
                         navigateTo={navigateTo}
                     />
@@ -247,8 +196,8 @@ export default function App() {
 }
 
 // --- Authentication Page ---
-function AuthPage() {
-    const [email, setEmail] = useState('');
+function AuthPage({ onLoginSuccess }) {
+    const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -258,11 +207,35 @@ function AuthPage() {
         setError('');
         setIsLoading(true);
         try {
-            const userCredential = await signInWithEmailAndPassword(auth, email, password);
-            await logAction(userCredential.user, 'login_success');
+            const usersRef = collection(db, "users");
+            const q = query(usersRef, where("username", "==", username.toLowerCase()));
+            const querySnapshot = await getDocs(q);
+
+            if (querySnapshot.empty) {
+                throw new Error("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง");
+            }
+            
+            let userDoc = null;
+            let userData = null;
+
+            querySnapshot.forEach(doc => {
+                const data = doc.data();
+                if(data.password === encodePass(password)) {
+                    userDoc = doc;
+                    userData = { id: doc.id, ...data };
+                }
+            });
+
+            if (userData) {
+                onLoginSuccess(userData);
+                await logAction(userData, 'login_success');
+            } else {
+                throw new Error("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง");
+            }
+
         } catch (err) {
-            setError('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
-            await logAction(null, 'login_failed', { email });
+            setError(err.message);
+            await logAction(null, 'login_failed', { username });
             console.error(err);
         } finally {
             setIsLoading(false);
@@ -278,11 +251,11 @@ function AuthPage() {
                 </div>
                 <form onSubmit={handleLogin} className="space-y-6">
                     <div>
-                        <label className="text-sm font-bold text-gray-400 block mb-2">อีเมล</label>
+                        <label className="text-sm font-bold text-gray-400 block mb-2">ชื่อผู้ใช้ (Username)</label>
                         <input
-                            type="email"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
+                            type="text"
+                            value={username}
+                            onChange={(e) => setUsername(e.target.value)}
                             className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition"
                             required
                         />
@@ -313,7 +286,9 @@ function AuthPage() {
     );
 }
 
-
+// ALL OTHER COMPONENTS (Sidebar, Header, PageContent, etc.) REMAIN THE SAME
+// But they will now receive the `currentUser` object from state instead of from Firebase Auth
+// ... (The rest of the components from the previous version are largely unchanged in their props, just what populates them)
 // --- Layout Components ---
 function Sidebar({ currentPage, navigateTo, userRole, isSidebarOpen, setIsSidebarOpen }) {
     const navItems = [
@@ -360,11 +335,10 @@ function Header({ userData, handleLogout, setIsSidebarOpen }) {
                 <Menu className="h-6 w-6" />
             </button>
             <div className="text-lg font-semibold text-gray-200 hidden md:block">
-                {/* Could be a breadcrumb or page title */}
             </div>
             <div className="flex items-center space-x-4">
                 <div className="text-right">
-                    <p className="font-semibold text-white">{userData?.displayName || userData?.email}</p>
+                    <p className="font-semibold text-white">{userData?.displayName || userData?.username}</p>
                     <p className="text-sm text-purple-400 capitalize font-medium">{userData?.role}</p>
                 </div>
                  <img
@@ -414,7 +388,6 @@ function HomePage({user, navigateTo}) {
         const finPath = `/artifacts/${appId}/public/data/finances`;
         const eventsPath = `/artifacts/${appId}/public/data/events`;
         
-        // Summary listener
         const unsubFin = onSnapshot(collection(db, finPath), (snapshot) => {
             let totalIncome = 0, totalExpense = 0;
             snapshot.forEach(doc => {
@@ -425,13 +398,11 @@ function HomePage({user, navigateTo}) {
             setSummary(prev => ({ ...prev, income: totalIncome, expense: totalExpense, balance: totalIncome - totalExpense }));
         });
 
-        // Latest transactions listener
         const qTx = query(collection(db, finPath), orderBy('createdAt', 'desc'), limit(3));
         const unsubLatestTx = onSnapshot(qTx, (snapshot) => {
             setLatestTx(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()})));
         });
 
-        // Events count listener
         const unsubEvents = onSnapshot(collection(db, eventsPath), (snapshot) => {
             setSummary(prev => ({ ...prev, events: snapshot.size }));
         });
@@ -557,7 +528,6 @@ function FinancePage({ user, userData }) {
                  )}
             </div>
 
-            {/* Floating Action Button */}
             <button 
                 onClick={() => setIsModalOpen(true)}
                 className="fixed bottom-8 right-8 bg-purple-600 hover:bg-purple-700 text-white w-16 h-16 rounded-full flex items-center justify-center shadow-2xl shadow-purple-600/40 transition-transform hover:scale-110"
@@ -585,7 +555,6 @@ function FinanceModal({ isOpen, onClose, user }) {
 
      useEffect(() => {
         if (!isOpen) return;
-        // Reset form on open
         setType('expense');
         setAmount('');
         setDescription('');
@@ -628,7 +597,7 @@ function FinanceModal({ isOpen, onClose, user }) {
 
         let fileURL = '';
         if (file) {
-            const storageRef = ref(storage, `attachments/${user.uid}/${Date.now()}_${file.name}`);
+            const storageRef = ref(storage, `attachments/${user.id}/${Date.now()}_${file.name}`);
             const uploadTask = uploadBytesResumable(storageRef, file);
             try {
                 await uploadTask;
@@ -643,7 +612,7 @@ function FinanceModal({ isOpen, onClose, user }) {
             amount: parseFloat(amount),
             category,
             description,
-            userId: user.uid,
+            userId: user.id,
             fileURL,
             createdAt: Timestamp.now()
         };
@@ -662,33 +631,24 @@ function FinanceModal({ isOpen, onClose, user }) {
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="เพิ่มรายการใหม่">
              <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Type Selection */}
                 <div className="grid grid-cols-2 gap-2">
                     <button type="button" onClick={() => setType('income')} className={`py-3 rounded-lg font-bold transition-colors ${type === 'income' ? 'bg-green-600 text-white' : 'bg-gray-700 hover:bg-gray-600'}`}>รายรับ</button>
                     <button type="button" onClick={() => setType('expense')} className={`py-3 rounded-lg font-bold transition-colors ${type === 'expense' ? 'bg-red-600 text-white' : 'bg-gray-700 hover:bg-gray-600'}`}>รายจ่าย</button>
                 </div>
-
-                {/* Amount */}
                 <div>
                     <label className="text-sm font-medium text-gray-400">จำนวนเงิน</label>
                     <input type="number" value={amount} onChange={e => setAmount(e.target.value)} required className="mt-1 w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-purple-500"/>
                 </div>
-                
-                {/* Category */}
                  <div>
                     <label className="text-sm font-medium text-gray-400">หมวดหมู่</label>
                     <select value={category} onChange={e => setCategory(e.target.value)} required className="mt-1 w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-purple-500">
                         {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                     </select>
                 </div>
-
-                {/* Description */}
                 <div>
                     <label className="text-sm font-medium text-gray-400">รายละเอียด</label>
                     <textarea value={description} onChange={e => setDescription(e.target.value)} rows="3" className="mt-1 w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-purple-500"></textarea>
                 </div>
-
-                {/* File Upload */}
                 <div>
                     <label className="text-sm font-medium text-gray-400">ไฟล์แนบ (ถ้ามี)</label>
                     <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-600 border-dashed rounded-md">
@@ -708,8 +668,6 @@ function FinanceModal({ isOpen, onClose, user }) {
                 </div>
 
                 {error && <p className="text-sm text-red-400 text-center">{error}</p>}
-
-                {/* Submit Button */}
                 <div className="pt-2">
                     <button type="submit" disabled={uploading} className="w-full py-3 px-4 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg shadow-lg shadow-purple-600/30 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-purple-500 transition-all duration-300 disabled:bg-gray-500 disabled:shadow-none">
                         {uploading ? 'กำลังบันทึก...' : 'บันทึกรายการ'}
@@ -871,7 +829,7 @@ function CalendarEventModal({ isOpen, onClose, user, eventDate, showNotification
             description,
             date: Timestamp.fromDate(eventDate),
             imageURL,
-            createdBy: user.uid,
+            createdBy: user.id,
             createdAt: Timestamp.now()
         };
 
@@ -1104,51 +1062,45 @@ function CategorySettings({ user }) {
 function UserSettings({ owner, showNotification }) {
     const [users, setUsers] = useState([]);
     const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [editingUser, setEditingUser] = useState(null);
     
     useEffect(() => {
-        const q = query(collection(db, 'users'));
+        const q = query(collection(db, 'users'), orderBy("username"));
         const unsub = onSnapshot(q, (snapshot) => {
             setUsers(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()})));
         });
         return unsub;
     }, []);
     
-    const handleRoleChange = async (targetUserId, newRole) => {
-        if (owner.uid === targetUserId) {
-            showNotification("ไม่สามารถเปลี่ยนสิทธิ์ของตนเองได้", 'error'); return;
-        }
-        await updateDoc(doc(db, 'users', targetUserId), { role: newRole });
-        await logAction(owner, 'permission_change', { targetUserId, newRole });
-        showNotification("เปลี่ยนสิทธิ์ผู้ใช้สำเร็จ", 'success');
-    };
+    const handleEditClick = (user) => {
+        setEditingUser(user);
+        setIsEditModalOpen(true);
+    }
 
-    const handleDeleteUserDoc = async (targetUserId) => {
-        if (owner.uid === targetUserId) {
+    const handleDeleteUser = async (userId) => {
+        if (owner.id === userId) {
              showNotification("ไม่สามารถลบข้อมูลตนเองได้", 'error'); return;
         }
-        await deleteDoc(doc(db, 'users', targetUserId));
-        await logAction(owner, 'delete_user_doc', { targetUserId });
-        showNotification("ลบเอกสารข้อมูลผู้ใช้แล้ว", 'success');
-        // A non-blocking alert is better than window.alert
-        showNotification("ขั้นตอนต่อไป: ไปที่ Firebase Console เพื่อลบบัญชี", "info");
+        await deleteDoc(doc(db, 'users', userId));
+        await logAction(owner, 'delete_user', { targetUserId: userId });
+        showNotification("ลบผู้ใช้สำเร็จ", 'success');
     }
 
     return (
         <div className="space-y-4">
             {isAddUserModalOpen && <AddUserModal isOpen={isAddUserModalOpen} onClose={() => setIsAddUserModalOpen(false)} showNotification={showNotification} owner={owner} />}
-            <div className="bg-purple-900/30 border border-purple-700 text-purple-300 p-4 rounded-lg">
-                <h4 className="font-bold">คำแนะนำในการจัดการผู้ใช้</h4>
-                <p className="text-sm mt-1">การเพิ่ม/ลบผู้ใช้ จะเป็นการสร้าง/ลบเฉพาะ "ข้อมูล" ในระบบเท่านั้น คุณต้องไปสร้าง/ลบบัญชีจริงใน Firebase Console ด้วยตนเอง</p>
-            </div>
+            {isEditModalOpen && <EditUserModal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} showNotification={showNotification} owner={owner} userToEdit={editingUser} />}
+            
             <div className="flex justify-between items-center">
                  <h3 className="text-xl font-bold text-white">รายชื่อผู้ใช้งาน</h3>
-                 <button onClick={() => setIsAddUserModalOpen(true)} className="flex items-center bg-purple-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-purple-700"><UserPlus className="mr-2"/>เพิ่มผู้ใช้</button>
+                 <button onClick={() => setIsAddUserModalOpen(true)} className="flex items-center bg-purple-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-purple-700"><UserPlus className="mr-2"/>เพิ่มผู้ใช้ใหม่</button>
             </div>
              <div className="overflow-x-auto">
                 <table className="w-full text-left">
                     <thead className="border-b border-gray-700">
                         <tr>
-                            <th className="p-3">อีเมล / ชื่อ</th>
+                            <th className="p-3">ชื่อผู้ใช้ / ชื่อจริง</th>
                             <th className="p-3">สิทธิ์</th>
                             <th className="p-3 text-center">จัดการ</th>
                         </tr>
@@ -1156,17 +1108,15 @@ function UserSettings({ owner, showNotification }) {
                     <tbody>
                         {users.map(u => (
                             <tr key={u.id} className="border-b border-gray-700/50 hover:bg-gray-700/50">
-                                <td className="p-3"><p className="font-semibold text-white">{u.displayName}</p><p className="text-sm text-gray-400">{u.email}</p></td>
+                                <td className="p-3"><p className="font-semibold text-white">{u.username}</p><p className="text-sm text-gray-400">{u.displayName}</p></td>
                                 <td className="p-3">
-                                     <select value={u.role} onChange={(e) => handleRoleChange(u.id, e.target.value)} className="p-2 bg-gray-700 border border-gray-600 rounded-md disabled:opacity-50" disabled={owner.uid === u.id || u.role === 'owner'}>
-                                        <option value="owner">Owner</option>
-                                        <option value="admin">Admin</option>
-                                        <option value="staff">Staff</option>
-                                    </select>
+                                     <span className={`px-2 py-1 rounded-full text-xs font-semibold ${u.role === 'owner' ? 'bg-purple-500/20 text-purple-400' : u.role === 'admin' ? 'bg-blue-500/20 text-blue-400' : 'bg-gray-500/20 text-gray-400'}`}>
+                                         {u.role}
+                                     </span>
                                 </td>
                                 <td className="p-3 text-center space-x-2">
-                                    <button onClick={() => sendPasswordResetEmail(auth, u.email)} className="p-2 text-gray-400 hover:text-blue-400" title="รีเซ็ตรหัสผ่าน"><KeyRound/></button>
-                                    <button onClick={() => handleDeleteUserDoc(u.id)} className="p-2 text-gray-400 hover:text-red-400 disabled:opacity-50" title="ลบผู้ใช้" disabled={owner.uid === u.id || u.role === 'owner'}><Trash2/></button>
+                                    <button onClick={() => handleEditClick(u)} className="p-2 text-gray-400 hover:text-blue-400" title="แก้ไขผู้ใช้"><Edit/></button>
+                                    <button onClick={() => handleDeleteUser(u.id)} className="p-2 text-gray-400 hover:text-red-400 disabled:opacity-50" title="ลบผู้ใช้" disabled={owner.id === u.id || u.role === 'owner'}><Trash2/></button>
                                 </td>
                             </tr>
                         ))}
@@ -1178,67 +1128,115 @@ function UserSettings({ owner, showNotification }) {
 }
 
 function AddUserModal({ isOpen, onClose, showNotification, owner }) {
-    const [email, setEmail] = useState('');
+    const [username, setUsername] = useState('');
+    const [password, setPassword] = useState('');
     const [displayName, setDisplayName] = useState('');
     const [role, setRole] = useState('staff');
     const [isLoading, setIsLoading] = useState(false);
-    const [isCreated, setIsCreated] = useState(false);
-
-    const handleCreateUserRecord = async (e) => {
+    const [showPassword, setShowPassword] = useState(false);
+    
+    const handleCreateUser = async (e) => {
         e.preventDefault();
         setIsLoading(true);
-        const userRecord = {
-            email, displayName, role, photoURL: '', createdAt: Timestamp.now()
+
+        const q = query(collection(db, "users"), where("username", "==", username.toLowerCase()));
+        const existingUser = await getDocs(q);
+        if (!existingUser.empty) {
+            showNotification("ชื่อผู้ใช้นี้มีอยู่แล้ว", 'error');
+            setIsLoading(false);
+            return;
+        }
+
+        const newUser = {
+            username: username.toLowerCase(),
+            password: encodePass(password),
+            displayName, 
+            role, 
+            photoURL: '', 
+            createdAt: Timestamp.now()
         };
         try {
-            // We use the email as a temporary doc ID
-            await setDoc(doc(db, "users", email), userRecord, { merge: true }); // Using email as temp ID is a workaround
-            await logAction(owner, 'create_user_record', userRecord);
-            showNotification("สร้างข้อมูลผู้ใช้สำเร็จ!", 'success');
-            setIsCreated(true);
+            const docRef = await addDoc(collection(db, "users"), newUser);
+            await logAction(owner, 'create_user', { newUserId: docRef.id, username });
+            showNotification("สร้างผู้ใช้ใหม่สำเร็จ!", 'success');
+            onClose();
         } catch(err) {
-            showNotification("เกิดข้อผิดพลาดในการสร้างข้อมูล", 'error');
+            showNotification("เกิดข้อผิดพลาด", 'error');
             console.error(err);
         } finally {
             setIsLoading(false);
         }
     };
     
-    const handleClose = () => {
-        setIsCreated(false);
-        onClose();
-    }
-
     return (
-        <Modal isOpen={isOpen} onClose={handleClose} title="เพิ่มผู้ใช้ใหม่">
-            {isCreated ? (
-                <div className="text-center space-y-4">
-                     <CheckCircle className="mx-auto h-16 w-16 text-green-400"/>
-                     <h4 className="text-xl font-bold text-white">สร้างข้อมูลผู้ใช้สำเร็จ</h4>
-                     <div className="bg-gray-700 p-4 rounded-lg text-left text-sm space-y-2">
-                        <p className="font-bold">ขั้นตอนต่อไป (สำคัญมาก):</p>
-                        <p>1. ไปที่ <b className="text-purple-400">Firebase Console</b></p>
-                        <p>2. ไปที่เมนู <b className="text-purple-400">Authentication</b></p>
-                        <p>3. กดปุ่ม <b className="text-purple-400">Add user</b> และใช้อีเมล: <b className="text-yellow-400">{email}</b></p>
-                        <p>4. ตั้งรหัสผ่านชั่วคราวแล้วแจ้งให้ผู้ใช้ทราบ</p>
-                        <p>5. เมื่อผู้ใช้ล็อกอินครั้งแรก ระบบจะตรวจหา UID และอัปเดตเอกสารข้อมูลให้ถูกต้อง</p>
-                     </div>
-                     <button onClick={handleClose} className="w-full py-3 mt-4 bg-purple-600 hover:bg-purple-700 rounded-lg">เสร็จสิ้น</button>
-                </div>
-            ) : (
-                 <form onSubmit={handleCreateUserRecord} className="space-y-4">
-                    <p className="text-sm text-gray-400">ขั้นตอนนี้จะสร้าง "เอกสารข้อมูล" สำหรับผู้ใช้ใหม่ในระบบก่อน</p>
-                    <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="อีเมลผู้ใช้ใหม่" required className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/>
-                    <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="ชื่อที่แสดง" required className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/>
-                    <select value={role} onChange={e => setRole(e.target.value)} className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg">
-                        <option value="staff">Staff</option>
-                        <option value="admin">Admin</option>
-                    </select>
-                    <button type="submit" disabled={isLoading} className="w-full py-3 bg-purple-600 hover:bg-purple-700 rounded-lg disabled:bg-gray-500">
-                         {isLoading ? "กำลังสร้างข้อมูล..." : "สร้างข้อมูลผู้ใช้ (ขั้นตอนที่ 1)"}
+        <Modal isOpen={isOpen} onClose={onClose} title="เพิ่มผู้ใช้ใหม่">
+            <form onSubmit={handleCreateUser} className="space-y-4">
+                <input type="text" value={username} onChange={e => setUsername(e.target.value)} placeholder="ชื่อผู้ใช้ (สำหรับล็อกอิน)" required className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/>
+                <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="ชื่อที่แสดง" required className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/>
+                <div className="relative">
+                    <input type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} placeholder="รหัสผ่าน" required className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/>
+                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute inset-y-0 right-0 px-3 text-gray-400">
+                        {showPassword ? <EyeOff/> : <Eye/>}
                     </button>
-                </form>
-            )}
+                </div>
+                <select value={role} onChange={e => setRole(e.target.value)} className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg">
+                    <option value="staff">Staff</option>
+                    <option value="admin">Admin</option>
+                </select>
+                <button type="submit" disabled={isLoading} className="w-full py-3 bg-purple-600 hover:bg-purple-700 rounded-lg disabled:bg-gray-500">
+                     {isLoading ? "กำลังสร้าง..." : "สร้างผู้ใช้"}
+                </button>
+            </form>
+        </Modal>
+    );
+}
+
+function EditUserModal({ isOpen, onClose, showNotification, owner, userToEdit }) {
+    const [newPassword, setNewPassword] = useState('');
+    const [role, setRole] = useState(userToEdit.role);
+    const [displayName, setDisplayName] = useState(userToEdit.displayName);
+    const [isLoading, setIsLoading] = useState(false);
+    
+    const handleUpdateUser = async (e) => {
+        e.preventDefault();
+        setIsLoading(true);
+
+        const updatedData = {
+            displayName,
+            role
+        };
+
+        if (newPassword) {
+            updatedData.password = encodePass(newPassword);
+        }
+
+        try {
+            await updateDoc(doc(db, "users", userToEdit.id), updatedData);
+            await logAction(owner, 'update_user', { targetUserId: userToEdit.id, ...updatedData });
+            showNotification("อัปเดตข้อมูลผู้ใช้สำเร็จ!", 'success');
+            onClose();
+        } catch(err) {
+            showNotification("เกิดข้อผิดพลาด", 'error');
+            console.error(err);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+    
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title={`แก้ไขผู้ใช้: ${userToEdit.username}`}>
+            <form onSubmit={handleUpdateUser} className="space-y-4">
+                <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="ชื่อที่แสดง" required className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/>
+                <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="รหัสผ่านใหม่ (เว้นว่างไว้หากไม่ต้องการเปลี่ยน)" className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/>
+                <select value={role} onChange={e => setRole(e.target.value)} className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg" disabled={userToEdit.role === 'owner'}>
+                    <option value="staff">Staff</option>
+                    <option value="admin">Admin</option>
+                    {userToEdit.role === 'owner' && <option value="owner">Owner</option>}
+                </select>
+                <button type="submit" disabled={isLoading} className="w-full py-3 bg-purple-600 hover:bg-purple-700 rounded-lg disabled:bg-gray-500">
+                     {isLoading ? "กำลังอัปเดต..." : "อัปเดตข้อมูล"}
+                </button>
+            </form>
         </Modal>
     );
 }
@@ -1246,31 +1244,28 @@ function AddUserModal({ isOpen, onClose, showNotification, owner }) {
 
 function ProfilePage({ user, userData, showNotification }) {
     const [displayName, setDisplayName] = useState(userData.displayName || '');
-    const [currentPassword, setCurrentPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [photo, setPhoto] = useState(null);
-    const [message, setMessage] = useState('');
     const [isUploading, setIsUploading] = useState(false);
 
     const handleProfileUpdate = async (e) => {
         e.preventDefault();
-        setMessage('');
         setIsUploading(true);
         try {
             let photoURL = userData.photoURL;
             if(photo) {
-                const storageRef = ref(storage, `profile-pictures/${user.uid}`);
+                const storageRef = ref(storage, `profile-pictures/${user.id}`);
                 await uploadBytesResumable(storageRef, photo);
                 photoURL = await getDownloadURL(storageRef);
             }
             
-            await updateDoc(doc(db, 'users', user.uid), { displayName, photoURL });
+            await updateDoc(doc(db, 'users', user.id), { displayName, photoURL });
             await logAction(user, 'update_profile', { displayName, photoURL: !!photoURL });
             showNotification('อัปเดตโปรไฟล์สำเร็จ!', 'success');
         } catch(error) {
             console.error(error);
-            showNotification('เกิดข้อผิดพลาดในการอัปเดตโปรไฟล์', 'error');
+            showNotification('เกิดข้อผิดพลาด', 'error');
         } finally {
             setIsUploading(false);
         }
@@ -1278,7 +1273,6 @@ function ProfilePage({ user, userData, showNotification }) {
     
     const handlePasswordChange = async (e) => {
         e.preventDefault();
-        setMessage('');
         if (newPassword !== confirmPassword) {
             showNotification('รหัสผ่านใหม่ไม่ตรงกัน', 'error'); return;
         }
@@ -1287,15 +1281,14 @@ function ProfilePage({ user, userData, showNotification }) {
         }
 
         try {
-            const credential = EmailAuthProvider.credential(user.email, currentPassword);
-            await reauthenticateWithCredential(user, credential);
-            await updatePassword(user, newPassword);
+            const newHashedPassword = encodePass(newPassword);
+            await updateDoc(doc(db, 'users', user.id), { password: newHashedPassword });
             await logAction(user, 'change_password');
             showNotification('เปลี่ยนรหัสผ่านสำเร็จ!', 'success');
-            setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
+            setNewPassword(''); setConfirmPassword('');
         } catch (error) {
             console.error(error);
-            showNotification('เกิดข้อผิดพลาด: รหัสผ่านปัจจุบันอาจไม่ถูกต้อง', 'error');
+            showNotification('เกิดข้อผิดพลาดในการเปลี่ยนรหัสผ่าน', 'error');
         }
     };
 
@@ -1324,17 +1317,13 @@ function ProfilePage({ user, userData, showNotification }) {
                         </button>
                     </form>
                     <div className="mt-6 border-t border-gray-700 pt-4 space-y-2">
-                        <p><strong className="font-medium text-gray-400">อีเมล:</strong> {userData.email}</p>
+                        <p><strong className="font-medium text-gray-400">ชื่อผู้ใช้:</strong> {userData.username}</p>
                         <p><strong className="font-medium text-gray-400">สิทธิ์:</strong> <span className="capitalize font-bold text-purple-400">{userData.role}</span></p>
                     </div>
                 </div>
                 <div className="bg-gray-800 p-6 rounded-2xl border border-gray-700">
                     <h3 className="text-xl font-semibold mb-4 text-purple-400">เปลี่ยนรหัสผ่าน</h3>
                     <form onSubmit={handlePasswordChange} className="space-y-4">
-                         <div>
-                            <label className="block text-sm font-medium text-gray-400">รหัสผ่านปัจจุบัน</label>
-                            <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} required className="mt-1 w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/>
-                        </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-400">รหัสผ่านใหม่</label>
                             <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} required className="mt-1 w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/>
@@ -1389,8 +1378,8 @@ function LogsPage() {
             create_event: 'สร้างกิจกรรม',
             permission_change: 'เปลี่ยนสิทธิ์',
             update_profile: 'อัปเดตโปรไฟล์', change_password: 'เปลี่ยนรหัสผ่าน',
-            export_report_csv: 'ส่งออก CSV', reset_password_request: 'ขอรีเซ็ตรหัสผ่าน',
-            delete_user_doc: 'ลบข้อมูลผู้ใช้', create_user_record: 'สร้างข้อมูลผู้ใช้',
+            export_report_csv: 'ส่งออก CSV', 
+            create_user: 'สร้างผู้ใช้ใหม่', delete_user: 'ลบผู้ใช้', update_user: 'อัปเดตผู้ใช้'
         };
         const actionStyle = {
             login_success: 'bg-green-500/20 text-green-400',
@@ -1398,6 +1387,9 @@ function LogsPage() {
             login_failed: 'bg-red-500/20 text-red-400',
             create_transaction: 'bg-blue-500/20 text-blue-400',
             delete_transaction: 'bg-red-500/20 text-red-400',
+            create_user: 'bg-green-500/20 text-green-400',
+            delete_user: 'bg-red-500/20 text-red-400',
+            update_user: 'bg-yellow-500/20 text-yellow-400',
         }
         return <span className={`px-2 py-1 rounded-full text-xs font-semibold ${actionStyle[action] || 'bg-gray-500/20 text-gray-400'}`}>{actions[action] || action}</span>;
     }
@@ -1420,7 +1412,7 @@ function LogsPage() {
                             {logs.map(log => (
                                 <tr key={log.id} className="border-t border-gray-700">
                                     <td className="p-3 whitespace-nowrap text-sm text-gray-400">{formatFullDate(log.timestamp)}</td>
-                                    <td className="p-3 text-sm text-gray-300">{log.userEmail}</td>
+                                    <td className="p-3 text-sm text-gray-300">{log.userDisplay}</td>
                                     <td className="p-3">{formatAction(log.action)}</td>
                                     <td className="p-3"><LogDetailView detailsString={log.details} /></td>
                                 </tr>
@@ -1432,3 +1424,4 @@ function LogsPage() {
         </div>
     );
 }
+
