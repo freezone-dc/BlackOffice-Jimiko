@@ -23,24 +23,27 @@ import {
     onSnapshot, 
     query, 
     orderBy,
-    Timestamp
+    limit,
+    Timestamp,
+    where
 } from 'firebase/firestore';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 import { 
     getStorage, 
     ref, 
     uploadBytesResumable, 
     getDownloadURL 
 } from 'firebase/storage';
+// Note: Recharts is a new library, you need to update package.json
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { 
-    LayoutDashboard, 
+    Home,
     DollarSign, 
     Calendar, 
-    BarChart2, 
+    BarChart2 as ReportIcon, 
     Settings, 
     User, 
     LogOut, 
-    PlusCircle,
+    Plus,
     Edit,
     Trash2,
     FileText,
@@ -50,21 +53,23 @@ import {
     History,
     AlertTriangle,
     KeyRound,
-    UserPlus
+    UserPlus,
+    ChevronLeft,
+    ChevronRight,
+    UploadCloud,
+    CheckCircle
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
-// หมายเหตุ: กรุณาแทนที่ด้วยค่า firebaseConfig จากโปรเจกต์ของคุณเอง
 const firebaseConfig = {
-  apiKey: "AIzaSyAn6mUtQbDlRRed-wMuIAIdJKnqoTt7fNQ",
-  authDomain: "dc-e-01.firebaseapp.com",
-  databaseURL: "https://dc-e-01-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "dc-e-01",
-  storageBucket: "dc-e-01.appspot.com",
-  messagingSenderId: "840620905723",
-  appId: "1:840620905723:web:002b11b102aa90b19c4c5e"
+  apiKey: "AIzaSyDLP8ZGO0YtzGHl7gp60D0MlyyoV-UVVrs",
+  authDomain: "blackoffice-jimiko.firebaseapp.com",
+  projectId: "blackoffice-jimiko",
+  storageBucket: "blackoffice-jimiko.appspot.com",
+  messagingSenderId: "881411328219",
+  appId: "1:881411328219:web:5b0de32586ac66ae43a4fe",
+  measurementId: "G-HKHFMC7K47"
 };
-
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
@@ -73,11 +78,12 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
-const functions = getFunctions(app); // Initialize Cloud Functions
 
 // --- Helper Functions ---
 const formatCurrency = (amount) => new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB' }).format(amount);
-const formatDate = (date) => date ? new Date(date.seconds * 1000).toLocaleDateString('th-TH') : 'N/A';
+const formatFullDate = (date) => date ? new Date(date.seconds * 1000).toLocaleString('th-TH') : 'N/A';
+const formatDateForInput = (date) => date ? new Date(date.seconds * 1000).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+
 
 const logAction = async (user, action, details = {}) => {
     try {
@@ -87,9 +93,8 @@ const logAction = async (user, action, details = {}) => {
             userId: user.uid,
             userEmail: user.email,
             timestamp: Timestamp.now(),
-            details: JSON.stringify(details)
+            details: JSON.stringify(details, null, 2) // Pretty print JSON
         };
-        // ใช้ path ที่รองรับสภาพแวดล้อมของคุณ
         const logCollectionPath = `/artifacts/${appId}/public/data/logs`;
         await addDoc(collection(db, logCollectionPath), logData);
     } catch (error) {
@@ -97,42 +102,50 @@ const logAction = async (user, action, details = {}) => {
     }
 };
 
-// --- Reusable Modal Component ---
-function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confirmText = "ยืนยัน" }) {
+// --- Reusable Components ---
+function Modal({ isOpen, onClose, children, title }) {
     if (!isOpen) return null;
-
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
-            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm">
-                <div className="flex items-center mb-4">
-                    <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mr-4">
-                        <AlertTriangle className="w-6 h-6 text-red-600" />
-                    </div>
-                    <div>
-                        <h3 className="text-xl font-bold">{title}</h3>
-                    </div>
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-50 p-4">
+            <div className="bg-gray-800 border border-gray-700 p-6 rounded-2xl shadow-xl w-full max-w-lg text-white">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-xl font-bold text-purple-400">{title}</h3>
+                    <button onClick={onClose} className="text-gray-400 hover:text-white"><X className="w-6 h-6"/></button>
                 </div>
-                <p className="text-gray-600 mb-6">{message}</p>
-                <div className="flex justify-end space-x-2">
-                    <button type="button" onClick={onClose} className="py-2 px-4 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">
-                        ยกเลิก
-                    </button>
-                    <button type="button" onClick={onConfirm} className="py-2 px-4 bg-red-600 text-white rounded-lg hover:bg-red-700">
-                        {confirmText}
-                    </button>
-                </div>
+                {children}
             </div>
         </div>
     );
 }
 
+function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confirmText = "ยืนยัน" }) {
+    if (!isOpen) return null;
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title={title}>
+            <div className="text-center">
+                <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-900 mb-4">
+                    <AlertTriangle className="h-6 w-6 text-red-400" />
+                </div>
+                <p className="text-gray-300 mb-6">{message}</p>
+                <div className="flex justify-center space-x-4">
+                    <button onClick={onClose} className="py-2 px-6 bg-gray-600 text-white rounded-lg hover:bg-gray-500 transition-colors">
+                        ยกเลิก
+                    </button>
+                    <button onClick={onConfirm} className="py-2 px-6 bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors">
+                        {confirmText}
+                    </button>
+                </div>
+            </div>
+        </Modal>
+    );
+}
 
 // --- Main App Component ---
 export default function App() {
     const [user, setUser] = useState(null);
     const [userData, setUserData] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
-    const [currentPage, setCurrentPage] = useState('dashboard');
+    const [currentPage, setCurrentPage] = useState('home'); // Changed from 'dashboard'
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
     
@@ -144,22 +157,22 @@ export default function App() {
     };
 
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
+        const unsubscribe = onAuthStateChanged(auth, (authUser) => {
+            setIsLoading(true);
             if (authUser) {
                 const userDocRef = doc(db, 'users', authUser.uid);
                 const unsubDoc = onSnapshot(userDocRef, (docSnap) => {
-                     if (docSnap.exists()) {
+                    if (docSnap.exists()) {
                         const fetchedUserData = { uid: authUser.uid, email: authUser.email, ...docSnap.data() };
                         setUser(authUser);
                         setUserData(fetchedUserData);
                     } else {
-                        console.log("User document does not exist for UID:", authUser.uid);
-                        // สร้าง document เริ่มต้นถ้ายังไม่มี
+                        console.log("User document not found, creating one:", authUser.uid);
                         const defaultUserData = {
                             uid: authUser.uid,
                             email: authUser.email,
                             displayName: authUser.email.split('@')[0],
-                            role: 'staff', // สิทธิ์เริ่มต้น
+                            role: 'staff',
                             photoURL: '',
                             createdAt: Timestamp.now()
                         };
@@ -167,7 +180,7 @@ export default function App() {
                         setUser(authUser);
                         setUserData(defaultUserData);
                     }
-                     setIsLoading(false);
+                    setIsLoading(false);
                 });
                 return () => unsubDoc();
             } else {
@@ -182,11 +195,16 @@ export default function App() {
     const handleLogout = async () => {
         await logAction(user, 'logout');
         await signOut(auth);
-        setCurrentPage('dashboard');
+        setCurrentPage('home');
     };
+    
+    const navigateTo = (page) => {
+      setCurrentPage(page);
+      setIsSidebarOpen(false);
+    }
 
     if (isLoading) {
-        return <div className="flex items-center justify-center min-h-screen bg-gray-100"><div className="text-xl font-semibold">กำลังโหลด...</div></div>;
+        return <div className="flex items-center justify-center min-h-screen bg-gray-900 text-purple-400"><div className="text-xl font-semibold animate-pulse">กำลังโหลด...</div></div>;
     }
 
     if (!user) {
@@ -194,32 +212,32 @@ export default function App() {
     }
 
     return (
-        <div className="flex h-screen bg-gray-50 text-gray-800">
+        <div className="flex h-screen bg-gray-900 text-gray-200 font-sans">
             {notification.show && (
-                <div className={`fixed top-5 right-5 text-white py-2 px-4 rounded-lg shadow-lg z-50 ${notification.type === 'success' ? 'bg-green-500' : 'bg-red-500'}`}>
+                <div className={`fixed top-5 right-5 text-white py-2 px-4 rounded-lg shadow-2xl z-[100] ${notification.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
                     {notification.message}
                 </div>
             )}
             <Sidebar 
                 currentPage={currentPage} 
-                setCurrentPage={setCurrentPage}
+                navigateTo={navigateTo}
                 userRole={userData?.role}
                 isSidebarOpen={isSidebarOpen}
                 setIsSidebarOpen={setIsSidebarOpen}
             />
             <div className="flex-1 flex flex-col overflow-hidden">
                 <Header 
-                    user={user} 
                     userData={userData}
                     handleLogout={handleLogout} 
                     setIsSidebarOpen={setIsSidebarOpen}
                 />
-                <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100 p-4 sm:p-6">
+                <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-900 p-4 sm:p-6 lg:p-8">
                     <PageContent 
                         page={currentPage} 
                         user={user} 
                         userData={userData} 
                         showNotification={showNotification}
+                        navigateTo={navigateTo}
                     />
                 </main>
             </div>
@@ -227,54 +245,65 @@ export default function App() {
     );
 }
 
-// --- Authentication Components ---
+// --- Authentication Page ---
 function AuthPage() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
 
     const handleLogin = async (e) => {
         e.preventDefault();
         setError('');
+        setIsLoading(true);
         try {
             const userCredential = await signInWithEmailAndPassword(auth, email, password);
-            await logAction(userCredential.user, 'login');
+            await logAction(userCredential.user, 'login_success');
         } catch (err) {
             setError('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+            await logAction(null, 'login_failed', { email });
             console.error(err);
+        } finally {
+            setIsLoading(false);
         }
     };
 
     return (
-        <div className="flex items-center justify-center min-h-screen bg-gray-100">
-            <div className="w-full max-w-md p-8 space-y-6 bg-white rounded-lg shadow-md">
-                <h2 className="text-2xl font-bold text-center text-gray-900">BlackOffice Jimiko</h2>
-                <p className="text-center text-gray-600">จัดการรายรับ-รายจ่าย และตารางงาน</p>
+        <div className="flex items-center justify-center min-h-screen bg-gray-900 p-4">
+            <div className="w-full max-w-sm p-8 space-y-6 bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl shadow-purple-900/20">
+                <div className="text-center">
+                    <h2 className="text-3xl font-bold text-white">BlackOffice <span className="text-purple-400">Jimiko</span></h2>
+                    <p className="text-gray-400 mt-2">โปรแกรมจัดการธุรกิจของคุณ</p>
+                </div>
                 <form onSubmit={handleLogin} className="space-y-6">
                     <div>
-                        <label className="text-sm font-bold text-gray-600 block">อีเมล</label>
+                        <label className="text-sm font-bold text-gray-400 block mb-2">อีเมล</label>
                         <input
                             type="email"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
-                            className="w-full p-2 border border-gray-300 rounded mt-1 focus:ring-2 focus:ring-indigo-500"
+                            className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition"
                             required
                         />
                     </div>
                     <div>
-                        <label className="text-sm font-bold text-gray-600 block">รหัสผ่าน</label>
+                        <label className="text-sm font-bold text-gray-400 block mb-2">รหัสผ่าน</label>
                         <input
                             type="password"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
-                            className="w-full p-2 border border-gray-300 rounded mt-1 focus:ring-2 focus:ring-indigo-500"
+                            className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition"
                             required
                         />
                     </div>
-                    {error && <p className="text-red-500 text-sm">{error}</p>}
+                    {error && <p className="text-red-400 text-sm text-center">{error}</p>}
                     <div>
-                        <button type="submit" className="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                            เข้าสู่ระบบ
+                        <button 
+                            type="submit" 
+                            disabled={isLoading}
+                            className="w-full py-3 px-4 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg shadow-lg shadow-purple-600/30 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-purple-500 transition-all duration-300 disabled:bg-gray-500 disabled:shadow-none"
+                        >
+                            {isLoading ? "กำลังตรวจสอบ..." : "เข้าสู่ระบบ"}
                         </button>
                     </div>
                 </form>
@@ -285,38 +314,37 @@ function AuthPage() {
 
 
 // --- Layout Components ---
-function Sidebar({ currentPage, setCurrentPage, userRole, isSidebarOpen, setIsSidebarOpen }) {
+function Sidebar({ currentPage, navigateTo, userRole, isSidebarOpen, setIsSidebarOpen }) {
     const navItems = [
-        { id: 'dashboard', label: 'แดชบอร์ด', icon: LayoutDashboard, roles: ['staff', 'admin', 'owner'] },
+        { id: 'home', label: 'หน้าแรก', icon: Home, roles: ['staff', 'admin', 'owner'] },
         { id: 'finance', label: 'รายรับ-รายจ่าย', icon: DollarSign, roles: ['staff', 'admin', 'owner'] },
         { id: 'calendar', label: 'ปฏิทินงาน', icon: Calendar, roles: ['staff', 'admin', 'owner'] },
-        { id: 'reports', label: 'รายงาน', icon: BarChart2, roles: ['admin', 'owner'] },
+        { id: 'reports', label: 'รายงาน', icon: ReportIcon, roles: ['admin', 'owner'] },
         { id: 'settings', label: 'ตั้งค่า', icon: Settings, roles: ['admin', 'owner'] },
         { id: 'profile', label: 'โปรไฟล์', icon: User, roles: ['staff', 'admin', 'owner'] },
         { id: 'logs', label: 'ประวัติการใช้งาน', icon: History, roles: ['owner'] },
     ];
     
     return (
-        <aside className={`bg-white text-gray-700 w-64 space-y-2 py-4 px-2 absolute inset-y-0 left-0 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 transition-transform duration-200 ease-in-out z-30 shadow-lg md:shadow-none`}>
-            <div className="px-4 pb-4 border-b">
-                <h1 className="text-xl font-bold text-indigo-600">BlackOffice</h1>
+        <aside className={`bg-gray-800 border-r border-gray-700 text-gray-300 w-64 space-y-2 py-4 px-2 absolute inset-y-0 left-0 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 transition-transform duration-300 ease-in-out z-40`}>
+            <div className="px-4 pb-4 border-b border-gray-700 flex items-center justify-between">
+                <h1 className="text-xl font-bold text-white">Black<span className="text-purple-400">Office</span></h1>
+                 <button onClick={() => setIsSidebarOpen(false)} className="text-gray-400 hover:text-white md:hidden">
+                    <X className="w-6 h-6" />
+                </button>
             </div>
-            <nav className="flex-grow pt-2">
+            <nav className="flex-grow pt-4">
                 {userRole ? navItems
                     .filter(item => item.roles.includes(userRole))
                     .map(item => (
                     <a
                         key={item.id}
                         href="#"
-                        onClick={(e) => {
-                            e.preventDefault();
-                            setCurrentPage(item.id);
-                            setIsSidebarOpen(false);
-                        }}
-                        className={`flex items-center py-2.5 px-4 rounded transition duration-200 ${currentPage === item.id ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-100'}`}
+                        onClick={(e) => { e.preventDefault(); navigateTo(item.id); }}
+                        className={`flex items-center py-3 px-4 rounded-lg transition-all duration-200 mb-1 ${currentPage === item.id ? 'bg-purple-600 text-white shadow-lg' : 'hover:bg-gray-700 hover:text-white'}`}
                     >
                         <item.icon className="w-5 h-5 mr-3" />
-                        {item.label}
+                        <span className="font-semibold">{item.label}</span>
                     </a>
                 )) : <div className="p-4 text-sm text-gray-500">กำลังโหลดเมนู...</div> }
             </nav>
@@ -324,26 +352,26 @@ function Sidebar({ currentPage, setCurrentPage, userRole, isSidebarOpen, setIsSi
     );
 }
 
-function Header({ user, userData, handleLogout, setIsSidebarOpen }) {
+function Header({ userData, handleLogout, setIsSidebarOpen }) {
     return (
-        <header className="bg-white shadow-sm p-4 flex justify-between items-center z-10">
-             <button onClick={() => setIsSidebarOpen(true)} className="text-gray-500 focus:outline-none md:hidden">
+        <header className="bg-gray-900/80 backdrop-blur-sm border-b border-gray-700 p-4 flex justify-between items-center z-20">
+             <button onClick={() => setIsSidebarOpen(true)} className="text-gray-400 focus:outline-none md:hidden">
                 <Menu className="h-6 w-6" />
             </button>
-            <div className="text-lg font-semibold text-gray-800 hidden md:block">
-                {/* Placeholder for page title if needed */}
+            <div className="text-lg font-semibold text-gray-200 hidden md:block">
+                {/* Could be a breadcrumb or page title */}
             </div>
             <div className="flex items-center space-x-4">
                 <div className="text-right">
-                    <p className="font-semibold">{userData?.displayName || user?.email}</p>
-                    <p className="text-sm text-gray-500 capitalize">{userData?.role}</p>
+                    <p className="font-semibold text-white">{userData?.displayName || userData?.email}</p>
+                    <p className="text-sm text-purple-400 capitalize font-medium">{userData?.role}</p>
                 </div>
                  <img
-                    className="h-10 w-10 rounded-full object-cover"
-                    src={userData?.photoURL || `https://placehold.co/40x40/E2E8F0/4A5568?text=${(userData?.displayName || 'U').charAt(0)}`}
+                    className="h-11 w-11 rounded-full object-cover border-2 border-purple-500"
+                    src={userData?.photoURL || `https://placehold.co/44x44/1F2937/A78BFA?text=${(userData?.displayName || 'U').charAt(0).toUpperCase()}`}
                     alt="โปรไฟล์"
                 />
-                <button onClick={handleLogout} className="text-gray-500 hover:text-indigo-600">
+                <button onClick={handleLogout} className="text-gray-400 hover:text-red-500 transition-colors" title="ออกจากระบบ">
                     <LogOut className="w-6 h-6" />
                 </button>
             </div>
@@ -351,23 +379,23 @@ function Header({ user, userData, handleLogout, setIsSidebarOpen }) {
     );
 }
 
-function PageContent({ page, user, userData, showNotification }) {
+function PageContent({ page, user, userData, showNotification, navigateTo }) {
     if (!userData) {
-         return <div className="flex items-center justify-center h-full"><div className="text-xl font-semibold">กำลังโหลดข้อมูลผู้ใช้...</div></div>;
+         return <div className="flex items-center justify-center h-full"><div className="text-xl font-semibold text-gray-500">กำลังโหลดข้อมูลผู้ใช้...</div></div>;
     }
     switch (page) {
-        case 'dashboard':
-            return <DashboardPage user={user} />;
+        case 'home':
+            return <HomePage user={user} navigateTo={navigateTo}/>;
         case 'finance':
             return <FinancePage user={user} userData={userData}/>;
         case 'calendar':
-            return <CalendarPage user={user} userData={userData}/>;
+            return <CalendarPage user={user} userData={userData} showNotification={showNotification}/>;
         case 'reports':
-            return <ReportsPage user={user} />;
+            return <ReportsPage user={user} userData={userData} />;
         case 'settings':
             return <SettingsPage user={user} userData={userData} showNotification={showNotification} />;
         case 'profile':
-            return <ProfilePage user={user} userData={userData}/>;
+            return <ProfilePage user={user} userData={userData} showNotification={showNotification} />;
         case 'logs':
             return <LogsPage />;
         default:
@@ -375,91 +403,115 @@ function PageContent({ page, user, userData, showNotification }) {
     }
 }
 
-
 // --- Page Components ---
 
-function DashboardPage({ user }) {
-    const [summary, setSummary] = useState({ income: 0, expense: 0, events: 0 });
-
+function HomePage({user, navigateTo}) {
+    const [summary, setSummary] = useState({ income: 0, expense: 0, balance: 0, events: 0 });
+    const [latestTx, setLatestTx] = useState([]);
+    
     useEffect(() => {
         const finPath = `/artifacts/${appId}/public/data/finances`;
         const eventsPath = `/artifacts/${appId}/public/data/events`;
         
-        const unsubFin = onSnapshot(query(collection(db, finPath)), (snapshot) => {
-             let totalIncome = 0, totalExpense = 0;
+        // Summary listener
+        const unsubFin = onSnapshot(collection(db, finPath), (snapshot) => {
+            let totalIncome = 0, totalExpense = 0;
             snapshot.forEach(doc => {
                 const data = doc.data();
                 if(data.type === 'income') totalIncome += data.amount;
                 else totalExpense += data.amount;
             });
-            setSummary(prev => ({ ...prev, income: totalIncome, expense: totalExpense }));
+            setSummary(prev => ({ ...prev, income: totalIncome, expense: totalExpense, balance: totalIncome - totalExpense }));
         });
 
-        const unsubEvents = onSnapshot(query(collection(db, eventsPath)), (snapshot) => {
+        // Latest transactions listener
+        const qTx = query(collection(db, finPath), orderBy('createdAt', 'desc'), limit(3));
+        const unsubLatestTx = onSnapshot(qTx, (snapshot) => {
+            setLatestTx(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()})));
+        });
+
+        // Events count listener
+        const unsubEvents = onSnapshot(collection(db, eventsPath), (snapshot) => {
             setSummary(prev => ({ ...prev, events: snapshot.size }));
         });
         
         return () => {
             unsubFin();
             unsubEvents();
+            unsubLatestTx();
         };
     }, []);
 
+    const SummaryCard = ({ title, value, icon, color, page }) => (
+        <div 
+            onClick={() => navigateTo(page)}
+            className={`bg-gray-800 p-6 rounded-2xl border border-gray-700 shadow-lg hover:border-${color}-500 hover:shadow-${color}-500/20 transition-all duration-300 cursor-pointer group`}
+        >
+            <div className="flex items-center justify-between">
+                <div>
+                    <p className="text-sm text-gray-400 font-medium">{title}</p>
+                    <p className="text-3xl font-bold text-white mt-1">{typeof value === 'number' ? formatCurrency(value) : value}</p>
+                </div>
+                <div className={`p-3 rounded-full bg-${color}-600/20 text-${color}-400 group-hover:bg-${color}-500 group-hover:text-white transition-colors`}>
+                   {icon}
+                </div>
+            </div>
+        </div>
+    );
+
     return (
-        <div>
-            <h2 className="text-2xl font-bold mb-6">แดชบอร์ด</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                <div className="bg-white p-6 rounded-lg shadow">
-                    <div className="flex items-center">
-                        <div className="p-3 rounded-full bg-green-100 text-green-600">
-                           <DollarSign />
-                        </div>
-                        <div className="ml-4">
-                            <p className="text-sm text-gray-500">รายรับทั้งหมด</p>
-                            <p className="text-2xl font-semibold">{formatCurrency(summary.income)}</p>
-                        </div>
+        <div className="space-y-8">
+            <h2 className="text-3xl font-bold text-white">หน้าแรก</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+                <SummaryCard title="รายรับทั้งหมด" value={summary.income} icon={<DollarSign/>} color="green" page="reports" />
+                <SummaryCard title="รายจ่ายทั้งหมด" value={summary.expense} icon={<DollarSign/>} color="red" page="reports" />
+                <SummaryCard title="คงเหลือทั้งหมด" value={summary.balance} icon={<DollarSign/>} color="purple" page="reports" />
+                <SummaryCard title="กิจกรรมในปฏิทิน" value={summary.events} icon={<Calendar/>} color="blue" page="calendar" />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2 bg-gray-800 p-6 rounded-2xl border border-gray-700">
+                    <h3 className="text-xl font-bold text-white mb-4">รายการล่าสุด</h3>
+                    <div className="space-y-4">
+                        {latestTx.length > 0 ? latestTx.map(t => (
+                            <div key={t.id} className="flex items-center justify-between bg-gray-700/50 p-4 rounded-lg">
+                                <div className="flex items-center">
+                                    <div className={`w-3 h-3 rounded-full mr-4 ${t.type === 'income' ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                    <div>
+                                        <p className="font-semibold text-white">{t.description || "ไม่มีรายละเอียด"}</p>
+                                        <p className="text-sm text-gray-400">{t.category} • {formatFullDate(t.createdAt)}</p>
+                                    </div>
+                                </div>
+                                <p className={`font-bold text-lg ${t.type === 'income' ? 'text-green-400' : 'text-red-400'}`}>
+                                    {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
+                                </p>
+                            </div>
+                        )) : (
+                            <p className="text-gray-500 text-center py-8">ยังไม่มีรายการ...</p>
+                        )}
                     </div>
                 </div>
-                 <div className="bg-white p-6 rounded-lg shadow">
-                    <div className="flex items-center">
-                        <div className="p-3 rounded-full bg-red-100 text-red-600">
-                           <DollarSign />
-                        </div>
-                        <div className="ml-4">
-                            <p className="text-sm text-gray-500">รายจ่ายทั้งหมด</p>
-                            <p className="text-2xl font-semibold">{formatCurrency(summary.expense)}</p>
-                        </div>
-                    </div>
-                </div>
-                 <div className="bg-white p-6 rounded-lg shadow">
-                    <div className="flex items-center">
-                        <div className="p-3 rounded-full bg-blue-100 text-blue-600">
-                           <Calendar />
-                        </div>
-                        <div className="ml-4">
-                            <p className="text-sm text-gray-500">กิจกรรมในปฏิทิน</p>
-                            <p className="text-2xl font-semibold">{summary.events} รายการ</p>
-                        </div>
-                    </div>
+                <div className="bg-gradient-to-br from-purple-600 to-red-500 p-6 rounded-2xl flex flex-col justify-center items-center text-center shadow-lg">
+                     <h3 className="text-2xl font-bold text-white">จัดการธุรกิจของคุณ</h3>
+                     <p className="text-purple-200 mt-2 mb-4">เพิ่มรายรับ-รายจ่าย หรือสร้างกิจกรรมใหม่ได้ง่ายๆ</p>
+                     <button onClick={() => navigateTo('finance')} className="bg-white/20 hover:bg-white/30 text-white font-bold py-2 px-4 rounded-lg transition-colors backdrop-blur-sm">
+                        ไปที่หน้ารายรับ-รายจ่าย
+                     </button>
                 </div>
             </div>
         </div>
     );
 }
 
+
 function FinancePage({ user, userData }) {
     const [transactions, setTransactions] = useState([]);
-    const [categories, setCategories] = useState([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [editingTransaction, setEditingTransaction] = useState(null);
-    const [showConfirmModal, setShowConfirmModal] = useState(false);
-    const [itemToDelete, setItemToDelete] = useState(null);
-
+    
     const financeCollectionPath = `/artifacts/${appId}/public/data/finances`;
-    const categoriesCollectionPath = `/artifacts/${appId}/public/data/categories`;
 
     useEffect(() => {
-        const q = query(collection(db, financeCollectionPath), orderBy('date', 'desc'));
+        const q = query(collection(db, financeCollectionPath), orderBy('createdAt', 'desc'));
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const transData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             setTransactions(transData);
@@ -467,169 +519,121 @@ function FinancePage({ user, userData }) {
         return unsubscribe;
     }, []);
 
-    useEffect(() => {
-        const q = query(collection(db, categoriesCollectionPath));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const catData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            setCategories(catData);
-        });
-        return unsubscribe;
-    }, []);
-
-    const handleAdd = () => {
-        setEditingTransaction(null);
-        setIsModalOpen(true);
-    };
-
-    const handleEdit = (transaction) => {
-        setEditingTransaction(transaction);
-        setIsModalOpen(true);
-    };
-
-    const handleDeleteClick = (id) => {
-        setItemToDelete(id);
-        setShowConfirmModal(true);
-    };
-
-    const confirmDelete = async () => {
-        if (itemToDelete) {
-            await deleteDoc(doc(db, financeCollectionPath, itemToDelete));
-            await logAction(user, 'delete_transaction', { transactionId: itemToDelete });
-            setItemToDelete(null);
-            setShowConfirmModal(false);
-        }
+    const handleDelete = async (id) => {
+        await deleteDoc(doc(db, financeCollectionPath, id));
+        await logAction(user, 'delete_transaction', { transactionId: id });
     };
 
     return (
-        <div>
-            <ConfirmModal 
-                isOpen={showConfirmModal}
-                onClose={() => setShowConfirmModal(false)}
-                onConfirm={confirmDelete}
-                title="ยืนยันการลบ"
-                message="คุณแน่ใจหรือไม่ว่าต้องการลบรายการนี้? การกระทำนี้ไม่สามารถย้อนกลับได้"
-                confirmText="ยืนยันการลบ"
-            />
-            <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold">รายรับ-รายจ่าย</h2>
-                <button onClick={handleAdd} className="flex items-center bg-indigo-600 text-white py-2 px-4 rounded-lg hover:bg-indigo-700">
-                    <PlusCircle className="w-5 h-5 mr-2" />
-                    เพิ่มรายการ
-                </button>
+        <div className="relative min-h-full">
+            <h2 className="text-3xl font-bold text-white mb-6">รายรับ-รายจ่าย</h2>
+            <div className="space-y-3">
+                 {transactions.length > 0 ? transactions.map(t => (
+                    <div key={t.id} className="bg-gray-800 border border-gray-700 p-4 rounded-xl flex items-center justify-between transition hover:border-purple-500">
+                         <div className="flex items-center">
+                            <div className={`p-3 rounded-full mr-4 ${t.type === 'income' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                                <DollarSign size={20}/>
+                            </div>
+                            <div>
+                                <p className="font-semibold text-white">{t.description || "ไม่มีรายละเอียด"}</p>
+                                <p className="text-sm text-gray-400">{t.category}</p>
+                                <p className="text-xs text-gray-500 mt-1">บันทึกเมื่อ: {formatFullDate(t.createdAt)}</p>
+                            </div>
+                        </div>
+                         <div className="flex items-center space-x-4">
+                            {t.fileURL && <a href={t.fileURL} target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:text-purple-300"><FileText/></a>}
+                            <p className={`font-bold text-xl ${t.type === 'income' ? 'text-green-400' : 'text-red-400'}`}>
+                                {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
+                            </p>
+                             <button onClick={() => handleDelete(t.id)} className="text-gray-500 hover:text-red-500 p-1"><Trash2 size={18}/></button>
+                        </div>
+                    </div>
+                 )) : (
+                    <div className="text-center py-20">
+                        <p className="text-gray-500">ยังไม่มีรายการ...</p>
+                        <p className="text-gray-600">กดปุ่ม + เพื่อเพิ่มรายการแรกของคุณ</p>
+                    </div>
+                 )}
             </div>
-            <div className="bg-white p-4 rounded-lg shadow overflow-x-auto">
-                <table className="w-full text-left">
-                    <thead>
-                        <tr className="border-b">
-                            <th className="p-2">วันที่</th>
-                            <th className="p-2">หมวดหมู่</th>
-                            <th className="p-2">รายละเอียด</th>
-                            <th className="p-2 text-right">จำนวนเงิน</th>
-                            <th className="p-2">ประเภท</th>
-                            <th className="p-2">ไฟล์แนบ</th>
-                            <th className="p-2 text-center">จัดการ</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {transactions.map(t => (
-                            <tr key={t.id} className="border-b hover:bg-gray-50">
-                                <td className="p-2">{formatDate(t.date)}</td>
-                                <td className="p-2">{t.category}</td>
-                                <td className="p-2">{t.description}</td>
-                                <td className="p-2 text-right">{formatCurrency(t.amount)}</td>
-                                <td className="p-2">
-                                    <span className={`px-2 py-1 text-xs font-semibold rounded-full ${t.type === 'income' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                                        {t.type === 'income' ? 'รายรับ' : 'รายจ่าย'}
-                                    </span>
-                                </td>
-                                <td className="p-2">
-                                    {t.fileURL && <a href={t.fileURL} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline"><FileText className="w-5 h-5"/></a>}
-                                </td>
-                                <td className="p-2 text-center">
-                                    <button onClick={() => handleEdit(t)} className="text-gray-500 hover:text-indigo-600 p-1"><Edit className="w-4 h-4"/></button>
-                                    <button onClick={() => handleDeleteClick(t.id)} className="text-gray-500 hover:text-red-600 p-1"><Trash2 className="w-4 h-4"/></button>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-            {isModalOpen && (
-                <FinanceModal
-                    isOpen={isModalOpen}
-                    setIsOpen={setIsModalOpen}
-                    transaction={editingTransaction}
-                    categories={categories}
-                    user={user}
-                />
-            )}
+
+            {/* Floating Action Button */}
+            <button 
+                onClick={() => setIsModalOpen(true)}
+                className="fixed bottom-8 right-8 bg-purple-600 hover:bg-purple-700 text-white w-16 h-16 rounded-full flex items-center justify-center shadow-2xl shadow-purple-600/40 transition-transform hover:scale-110"
+                title="เพิ่มรายการใหม่"
+            >
+                <Plus size={32}/>
+            </button>
+            <FinanceModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} user={user}/>
         </div>
     );
 }
 
-function FinanceModal({ isOpen, setIsOpen, transaction, categories, user }) {
+function FinanceModal({ isOpen, onClose, user }) {
     const [type, setType] = useState('expense');
     const [amount, setAmount] = useState('');
     const [category, setCategory] = useState('');
     const [description, setDescription] = useState('');
-    const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
     const [file, setFile] = useState(null);
     const [uploading, setUploading] = useState(false);
     const [error, setError] = useState('');
-    
-    const financeCollectionPath = `/artifacts/${appId}/public/data/finances`;
+    const [categories, setCategories] = useState([]);
 
-    useEffect(() => {
-        if (transaction) {
-            setType(transaction.type);
-            setAmount(transaction.amount);
-            setCategory(transaction.category);
-            setDescription(transaction.description);
-            setDate(new Date(transaction.date.seconds * 1000).toISOString().slice(0, 10));
-        } else {
-            setType('expense');
-            setAmount('');
-            setCategory(categories.length > 0 ? categories[0].name : '');
-            setDescription('');
-            setDate(new Date().toISOString().slice(0, 10));
-        }
-    }, [transaction, categories, isOpen]);
+    const financeCollectionPath = `/artifacts/${appId}/public/data/finances`;
+    const categoriesCollectionPath = `/artifacts/${appId}/public/data/categories`;
+
+     useEffect(() => {
+        if (!isOpen) return;
+        // Reset form on open
+        setType('expense');
+        setAmount('');
+        setDescription('');
+        setFile(null);
+        setError('');
+
+        const q = query(collection(db, categoriesCollectionPath));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const catData = snapshot.docs.map(doc => doc.data().name);
+            setCategories(catData);
+            if (catData.length > 0) {
+                setCategory(catData[0]);
+            }
+        });
+        return unsubscribe;
+    }, [isOpen]);
 
     const handleFileChange = (e) => {
         const selectedFile = e.target.files[0];
         if (selectedFile) {
             const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf'];
             if (!allowedTypes.includes(selectedFile.type)) {
-                setError('ไฟล์ต้องเป็น JPG, PNG, หรือ PDF เท่านั้น');
-                return;
+                setError('ไฟล์ต้องเป็น JPG, PNG, หรือ PDF เท่านั้น'); return;
             }
             if (selectedFile.size > 5 * 1024 * 1024) { // 5MB
-                setError('ขนาดไฟล์ต้องไม่เกิน 5MB');
-                return;
+                setError('ขนาดไฟล์ต้องไม่เกิน 5MB'); return;
             }
-            setError('');
-            setFile(selectedFile);
+            setError(''); setFile(selectedFile);
         }
     };
     
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if(!amount || !category) {
+            setError("กรุณากรอกจำนวนเงินและเลือกหมวดหมู่");
+            return;
+        }
         setUploading(true);
         setError('');
 
-        let fileURL = transaction?.fileURL || '';
+        let fileURL = '';
         if (file) {
             const storageRef = ref(storage, `attachments/${user.uid}/${Date.now()}_${file.name}`);
             const uploadTask = uploadBytesResumable(storageRef, file);
-
             try {
                 await uploadTask;
                 fileURL = await getDownloadURL(uploadTask.snapshot.ref);
             } catch (err) {
-                console.error("Upload failed", err);
-                setError('อัปโหลดไฟล์ล้มเหลว');
-                setUploading(false);
-                return;
+                setError('อัปโหลดไฟล์ล้มเหลว'); setUploading(false); return;
             }
         }
 
@@ -638,121 +642,268 @@ function FinanceModal({ isOpen, setIsOpen, transaction, categories, user }) {
             amount: parseFloat(amount),
             category,
             description,
-            date: Timestamp.fromDate(new Date(date)),
             userId: user.uid,
             fileURL,
-            updatedAt: Timestamp.now()
+            createdAt: Timestamp.now()
         };
 
         try {
-            if (transaction) {
-                const docRef = doc(db, financeCollectionPath, transaction.id);
-                await updateDoc(docRef, transactionData);
-                await logAction(user, 'update_transaction', { transactionId: transaction.id, ...transactionData });
-            } else {
-                const docRef = await addDoc(collection(db, financeCollectionPath), { ...transactionData, createdAt: Timestamp.now() });
-                await logAction(user, 'create_transaction', { transactionId: docRef.id, ...transactionData });
-            }
-            setIsOpen(false);
+            const docRef = await addDoc(collection(db, financeCollectionPath), transactionData);
+            await logAction(user, 'create_transaction', { transactionId: docRef.id, ...transactionData });
+            onClose();
         } catch (err) {
-            console.error("Firestore operation failed", err);
             setError('บันทึกข้อมูลล้มเหลว');
         } finally {
             setUploading(false);
         }
     };
 
-    if (!isOpen) return null;
-
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
-            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg">
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-bold">{transaction ? 'แก้ไขรายการ' : 'เพิ่มรายการใหม่'}</h3>
-                    <button onClick={() => setIsOpen(false)}><X className="w-6 h-6"/></button>
+        <Modal isOpen={isOpen} onClose={onClose} title="เพิ่มรายการใหม่">
+             <form onSubmit={handleSubmit} className="space-y-4">
+                {/* Type Selection */}
+                <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => setType('income')} className={`py-3 rounded-lg font-bold transition-colors ${type === 'income' ? 'bg-green-600 text-white' : 'bg-gray-700 hover:bg-gray-600'}`}>รายรับ</button>
+                    <button type="button" onClick={() => setType('expense')} className={`py-3 rounded-lg font-bold transition-colors ${type === 'expense' ? 'bg-red-600 text-white' : 'bg-gray-700 hover:bg-gray-600'}`}>รายจ่าย</button>
                 </div>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">ประเภท</label>
-                        <select value={type} onChange={e => setType(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm">
-                            <option value="income">รายรับ</option>
-                            <option value="expense">รายจ่าย</option>
-                        </select>
+
+                {/* Amount */}
+                <div>
+                    <label className="text-sm font-medium text-gray-400">จำนวนเงิน</label>
+                    <input type="number" value={amount} onChange={e => setAmount(e.target.value)} required className="mt-1 w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-purple-500"/>
+                </div>
+                
+                {/* Category */}
+                 <div>
+                    <label className="text-sm font-medium text-gray-400">หมวดหมู่</label>
+                    <select value={category} onChange={e => setCategory(e.target.value)} required className="mt-1 w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-purple-500">
+                        {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                    </select>
+                </div>
+
+                {/* Description */}
+                <div>
+                    <label className="text-sm font-medium text-gray-400">รายละเอียด</label>
+                    <textarea value={description} onChange={e => setDescription(e.target.value)} rows="3" className="mt-1 w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-purple-500"></textarea>
+                </div>
+
+                {/* File Upload */}
+                <div>
+                    <label className="text-sm font-medium text-gray-400">ไฟล์แนบ (ถ้ามี)</label>
+                    <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-600 border-dashed rounded-md">
+                        <div className="space-y-1 text-center">
+                            <UploadCloud className="mx-auto h-12 w-12 text-gray-500" />
+                            <div className="flex text-sm text-gray-400">
+                                <label htmlFor="file-upload" className="relative cursor-pointer bg-gray-700 rounded-md font-medium text-purple-400 hover:text-purple-300 px-2">
+                                    <span>อัปโหลดไฟล์</span>
+                                    <input id="file-upload" name="file-upload" type="file" onChange={handleFileChange} className="sr-only"/>
+                                </label>
+                                <p className="pl-1">หรือลากมาวาง</p>
+                            </div>
+                            <p className="text-xs text-gray-500">PNG, JPG, PDF ไม่เกิน 5MB</p>
+                        </div>
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">จำนวนเงิน</label>
-                        <input type="number" value={amount} onChange={e => setAmount(e.target.value)} required className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm"/>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">หมวดหมู่</label>
-                        <select value={category} onChange={e => setCategory(e.target.value)} required className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm">
-                            {categories.map(cat => <option key={cat.id} value={cat.name}>{cat.name}</option>)}
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">รายละเอียด</label>
-                        <textarea value={description} onChange={e => setDescription(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm"></textarea>
-                    </div>
-                     <div>
-                        <label className="block text-sm font-medium text-gray-700">วันที่</label>
-                        <input type="date" value={date} onChange={e => setDate(e.target.value)} required className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm"/>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">ไฟล์แนบ (JPG, PNG, PDF ไม่เกิน 5MB)</label>
-                        <input type="file" onChange={handleFileChange} className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"/>
-                        {file && <p className="text-sm text-gray-500 mt-1">{file.name}</p>}
-                        {transaction?.fileURL && !file && <a href={transaction.fileURL} target="_blank" rel="noopener noreferrer" className="text-sm text-indigo-600 hover:underline">ดูไฟล์ปัจจุบัน</a>}
-                    </div>
-                    {error && <p className="text-sm text-red-500">{error}</p>}
-                    <div className="flex justify-end space-x-2 pt-4">
-                        <button type="button" onClick={() => setIsOpen(false)} className="py-2 px-4 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">ยกเลิก</button>
-                        <button type="submit" disabled={uploading} className="py-2 px-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-indigo-300">
-                            {uploading ? 'กำลังบันทึก...' : 'บันทึก'}
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
+                    {file && <p className="text-sm text-green-400 mt-2 text-center">{file.name}</p>}
+                </div>
+
+                {error && <p className="text-sm text-red-400 text-center">{error}</p>}
+
+                {/* Submit Button */}
+                <div className="pt-2">
+                    <button type="submit" disabled={uploading} className="w-full py-3 px-4 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg shadow-lg shadow-purple-600/30 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-purple-500 transition-all duration-300 disabled:bg-gray-500 disabled:shadow-none">
+                        {uploading ? 'กำลังบันทึก...' : 'บันทึกรายการ'}
+                    </button>
+                </div>
+            </form>
+        </Modal>
     );
 }
 
-function CalendarPage({user, userData}) {
+function CalendarPage({ user, userData, showNotification }) {
+    const [currentDate, setCurrentDate] = useState(new Date());
     const [events, setEvents] = useState([]);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [selectedDate, setSelectedDate] = useState(null);
+
     const eventsCollectionPath = `/artifacts/${appId}/public/data/events`;
 
     useEffect(() => {
-        const q = query(collection(db, eventsCollectionPath), orderBy('date', 'asc'));
+        const firstDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+        const lastDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+
+        const q = query(
+            collection(db, eventsCollectionPath),
+            where('date', '>=', firstDayOfMonth),
+            where('date', '<=', lastDayOfMonth)
+        );
+        
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const eventsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             setEvents(eventsData);
         });
         return unsubscribe;
-    }, []);
+    }, [currentDate]);
+    
+    const handleAddEventClick = (date) => {
+        setSelectedDate(date);
+        setIsModalOpen(true);
+    };
 
-    return (
+    const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
+    const firstDayIndex = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).getDay();
+    
+    const calendarDays = [];
+    for (let i = 0; i < firstDayIndex; i++) {
+        calendarDays.push({ key: `empty-${i}`, empty: true });
+    }
+    for (let day = 1; day <= daysInMonth; day++) {
+        const date = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+        calendarDays.push({ 
+            key: `day-${day}`, 
+            day, 
+            date, 
+            isToday: day === new Date().getDate() && currentDate.getMonth() === new Date().getMonth() && currentDate.getFullYear() === new Date().getFullYear()
+        });
+    }
+
+    const changeMonth = (offset) => {
+        setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() + offset, 1));
+    };
+    
+    return(
         <div>
-            <h2 className="text-2xl font-bold mb-6">ปฏิทินงาน</h2>
-             <div className="bg-white p-4 rounded-lg shadow">
-                <h3 className="text-lg font-semibold mb-3">รายการกิจกรรมทั้งหมด</h3>
-                <ul className="space-y-3">
-                    {events.map(event => (
-                        <li key={event.id} className="p-3 bg-gray-50 rounded-md border-l-4 border-indigo-500">
-                           <p className="font-bold">{event.title}</p>
-                           <p className="text-sm text-gray-600">{event.description}</p>
-                           <p className="text-xs text-gray-500 mt-1">วันที่: {formatDate(event.date)}</p>
-                        </li>
-                    ))}
-                    {events.length === 0 && <p className="text-gray-500">ยังไม่มีกิจกรรม</p>}
-                </ul>
-                <div className="mt-4">
-                    <p className="text-sm text-gray-600">หมายเหตุ: ไม่มีการสร้างกิจกรรมซ้ำและการแจ้งเตือนอัตโนมัติ</p>
+            <div className="flex justify-between items-center mb-6">
+                <h2 className="text-3xl font-bold text-white">ปฏิทินงาน</h2>
+                <div className="flex items-center space-x-2">
+                    <button onClick={() => changeMonth(-1)} className="p-2 rounded-md bg-gray-700 hover:bg-gray-600"><ChevronLeft/></button>
+                    <span className="text-xl font-semibold text-purple-400 w-48 text-center">
+                        {currentDate.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })}
+                    </span>
+                    <button onClick={() => changeMonth(1)} className="p-2 rounded-md bg-gray-700 hover:bg-gray-600"><ChevronRight/></button>
                 </div>
-             </div>
+            </div>
+
+            <div className="grid grid-cols-7 gap-1 bg-gray-800 p-2 rounded-xl">
+                {['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'].map(day => (
+                    <div key={day} className="text-center font-bold text-gray-400 py-2">{day}</div>
+                ))}
+                {calendarDays.map(item => {
+                    if(item.empty) return <div key={item.key}></div>;
+                    
+                    const dayEvents = events.filter(e => new Date(e.date.seconds * 1000).getDate() === item.day);
+                    
+                    return (
+                        <div key={item.key} className="bg-gray-900 rounded-lg h-40 p-2 flex flex-col relative group">
+                            <time dateTime={item.date.toISOString()} className={`font-bold ${item.isToday ? 'bg-purple-600 text-white rounded-full w-7 h-7 flex items-center justify-center' : 'text-gray-300'}`}>
+                                {item.day}
+                            </time>
+                            <div className="flex-grow overflow-y-auto mt-1 space-y-1">
+                                {dayEvents.map(event => (
+                                    <div key={event.id} className="bg-purple-900/50 p-1 rounded-md text-xs">
+                                        <p className="text-white truncate font-semibold">{event.title}</p>
+                                        {event.imageURL && <img src={event.imageURL} className="w-full h-10 object-cover rounded-sm mt-1"/>}
+                                    </div>
+                                ))}
+                            </div>
+                            <button onClick={() => handleAddEventClick(item.date)} className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity bg-green-500 text-white rounded-full w-6 h-6 flex items-center justify-center">
+                                <Plus size={16}/>
+                            </button>
+                        </div>
+                    );
+                })}
+            </div>
+            <CalendarEventModal 
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+                user={user}
+                eventDate={selectedDate}
+                showNotification={showNotification}
+            />
         </div>
-    )
+    );
 }
 
-function ReportsPage({ user }) {
+function CalendarEventModal({ isOpen, onClose, user, eventDate, showNotification }) {
+    const [title, setTitle] = useState('');
+    const [description, setDescription] = useState('');
+    const [file, setFile] = useState(null);
+    const [uploading, setUploading] = useState(false);
+    
+    useEffect(() => {
+        if(isOpen) {
+            setTitle('');
+            setDescription('');
+            setFile(null);
+        }
+    }, [isOpen]);
+
+    const handleFileChange = (e) => {
+        const selectedFile = e.target.files[0];
+        if (selectedFile && selectedFile.type.startsWith('image/')) {
+            setFile(selectedFile);
+        } else {
+            showNotification("กรุณาเลือกไฟล์รูปภาพเท่านั้น", "error");
+        }
+    };
+    
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if(!title) return;
+        setUploading(true);
+        
+        let imageURL = '';
+        if (file) {
+            const storageRef = ref(storage, `event-images/${Date.now()}_${file.name}`);
+            const uploadTask = uploadBytesResumable(storageRef, file);
+            try {
+                await uploadTask;
+                imageURL = await getDownloadURL(uploadTask.snapshot.ref);
+            } catch (err) {
+                 setUploading(false);
+                 showNotification("อัปโหลดรูปภาพล้มเหลว", "error");
+                 return;
+            }
+        }
+
+        const eventData = {
+            title,
+            description,
+            date: Timestamp.fromDate(eventDate),
+            imageURL,
+            createdBy: user.uid,
+            createdAt: Timestamp.now()
+        };
+
+        try {
+            const docRef = await addDoc(collection(db, `/artifacts/${appId}/public/data/events`), eventData);
+            await logAction(user, 'create_event', { eventId: docRef.id, title });
+            showNotification("สร้างกิจกรรมสำเร็จ!", "success");
+            onClose();
+        } catch (err) {
+             showNotification("สร้างกิจกรรมล้มเหลว", "error");
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    return(
+        <Modal isOpen={isOpen} onClose={onClose} title={`สร้างกิจกรรมสำหรับวันที่ ${eventDate?.toLocaleDateString('th-TH')}`}>
+            <form onSubmit={handleSubmit} className="space-y-4">
+                <input type="text" placeholder="ชื่องาน" value={title} onChange={(e) => setTitle(e.target.value)} required className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/>
+                <textarea placeholder="รายละเอียด..." value={description} onChange={(e) => setDescription(e.target.value)} rows="3" className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"></textarea>
+                <div>
+                     <label className="text-sm font-medium text-gray-400">แนบรูปภาพ</label>
+                     <input type="file" onChange={handleFileChange} accept="image/*" className="mt-1 block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-600/50 file:text-purple-300 hover:file:bg-purple-600"/>
+                </div>
+                <button type="submit" disabled={uploading} className="w-full py-3 bg-purple-600 hover:bg-purple-700 rounded-lg disabled:bg-gray-500">
+                    {uploading ? "กำลังสร้าง..." : "สร้างกิจกรรม"}
+                </button>
+            </form>
+        </Modal>
+    );
+}
+
+function ReportsPage({ user, userData }) {
     const [transactions, setTransactions] = useState([]);
     const [filteredData, setFilteredData] = useState([]);
     const [dateRange, setDateRange] = useState({
@@ -778,7 +929,7 @@ function ReportsPage({ user }) {
         end.setHours(23, 59, 59, 999);
         
         const filtered = transactions.filter(t => {
-            const tDate = t.date.toDate();
+            const tDate = t.createdAt.toDate();
             return tDate >= start && tDate <= end;
         });
         setFilteredData(filtered);
@@ -790,12 +941,13 @@ function ReportsPage({ user }) {
 
     const exportToCSV = () => {
         let csvContent = "\uFEFF" + "data:text/csv;charset=utf-8,";
-        csvContent += "วันที่,ประเภท,หมวดหมู่,รายละเอียด,จำนวนเงิน\n";
+        csvContent += "วันที่บันทึก,ประเภท,หมวดหมู่,รายละเอียด,จำนวนเงิน,ไฟล์แนบ\n";
         
         filteredData.forEach(row => {
-            const date = formatDate(row.date);
+            const date = formatFullDate(row.createdAt);
             const type = row.type === 'income' ? 'รายรับ' : 'รายจ่าย';
-            const line = `"${date}","${type}","${row.category}","${row.description}",${row.amount}\n`;
+            const description = `"${row.description.replace(/"/g, '""')}"`
+            const line = `"${date}","${type}","${row.category}",${description},${row.amount},"${row.fileURL}"\n`;
             csvContent += line;
         });
 
@@ -817,46 +969,55 @@ function ReportsPage({ user }) {
         }, { income: 0, expense: 0 });
     }, [filteredData]);
 
+    const chartData = [
+        { name: 'รายรับ', value: summary.income, fill: '#4ade80' },
+        { name: 'รายจ่าย', value: summary.expense, fill: '#f87171' }
+    ];
+
     return (
-        <div>
-            <h2 className="text-2xl font-bold mb-6">รายงานและกราฟ</h2>
-            <div className="bg-white p-4 rounded-lg shadow mb-6">
-                <div className="flex flex-col md:flex-row gap-4 items-center">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">วันที่เริ่มต้น</label>
-                        <input type="date" name="start" value={dateRange.start} onChange={handleDateChange} className="mt-1 p-2 border rounded-md"/>
+        <div className="space-y-8">
+            <h2 className="text-3xl font-bold text-white">รายงาน</h2>
+            <div className="bg-gray-800 p-6 rounded-2xl border border-gray-700">
+                <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+                    <div className="flex gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-1">วันที่เริ่มต้น</label>
+                            <input type="date" name="start" value={dateRange.start} onChange={handleDateChange} className="p-2 bg-gray-700 border border-gray-600 rounded-md"/>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-1">วันที่สิ้นสุด</label>
+                            <input type="date" name="end" value={dateRange.end} onChange={handleDateChange} className="p-2 bg-gray-700 border border-gray-600 rounded-md"/>
+                        </div>
                     </div>
-                     <div>
-                        <label className="block text-sm font-medium text-gray-700">วันที่สิ้นสุด</label>
-                        <input type="date" name="end" value={dateRange.end} onChange={handleDateChange} className="mt-1 p-2 border rounded-md"/>
-                    </div>
-                    <div className="self-end pt-5">
-                        <button onClick={exportToCSV} className="bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700">
+                    {userData.role === 'owner' && (
+                        <button onClick={exportToCSV} className="bg-green-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-green-700 w-full md:w-auto">
                             Export to CSV
                         </button>
-                    </div>
+                    )}
                 </div>
             </div>
 
-             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                <div className="bg-white p-6 rounded-lg shadow text-center">
-                    <p className="text-lg text-green-600 font-semibold">รายรับรวม</p>
-                    <p className="text-3xl font-bold">{formatCurrency(summary.income)}</p>
-                </div>
-                <div className="bg-white p-6 rounded-lg shadow text-center">
-                    <p className="text-lg text-red-600 font-semibold">รายจ่ายรวม</p>
-                    <p className="text-3xl font-bold">{formatCurrency(summary.expense)}</p>
-                </div>
-                <div className="bg-white p-6 rounded-lg shadow text-center">
-                    <p className="text-lg text-indigo-600 font-semibold">คงเหลือ</p>
-                    <p className="text-3xl font-bold">{formatCurrency(summary.income - summary.expense)}</p>
-                </div>
-            </div>
-
-            <div className="bg-white p-6 rounded-lg shadow">
-                 <h3 className="text-lg font-semibold mb-4">กราฟสรุป</h3>
-                 <div className="w-full h-64 bg-gray-100 flex items-center justify-center rounded-md">
-                    <p className="text-gray-500">ส่วนแสดงกราฟ (ยังไม่ถูกพัฒนา)</p>
+            <div className="bg-gray-800 p-6 rounded-2xl border border-gray-700">
+                 <h3 className="text-xl font-bold text-white mb-4">สรุปและกราฟ</h3>
+                 <div className="w-full h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={chartData} margin={{ top: 5, right: 20, left: 20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#4a5568" />
+                            <XAxis dataKey="name" tick={{ fill: '#a0aec0' }} />
+                            <YAxis tickFormatter={(value) => formatCurrency(value)} tick={{ fill: '#a0aec0' }}/>
+                            <Tooltip
+                                contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #4A5568', borderRadius: '0.5rem' }}
+                                labelStyle={{ color: '#A78BFA' }}
+                                formatter={(value) => formatCurrency(value)}
+                            />
+                            <Bar dataKey="value" barSize={80} radius={[8, 8, 0, 0]} />
+                        </BarChart>
+                    </ResponsiveContainer>
+                 </div>
+                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6 text-center">
+                     <div className="bg-green-500/10 p-4 rounded-lg"><p className="text-green-400 font-semibold">รายรับรวม: {formatCurrency(summary.income)}</p></div>
+                     <div className="bg-red-500/10 p-4 rounded-lg"><p className="text-red-400 font-semibold">รายจ่ายรวม: {formatCurrency(summary.expense)}</p></div>
+                     <div className="bg-purple-500/10 p-4 rounded-lg"><p className="text-purple-400 font-semibold">คงเหลือ: {formatCurrency(summary.income - summary.expense)}</p></div>
                  </div>
             </div>
         </div>
@@ -864,27 +1025,26 @@ function ReportsPage({ user }) {
 }
 
 function SettingsPage({ user, userData, showNotification }) {
-    if (userData.role !== 'admin' && userData.role !== 'owner') {
-        return <div>คุณไม่มีสิทธิ์เข้าถึงหน้านี้</div>;
-    }
     const [currentTab, setCurrentTab] = useState('categories');
     
     return (
-        <div>
-            <h2 className="text-2xl font-bold mb-6">ตั้งค่าระบบ</h2>
-            <div className="flex border-b mb-4">
-                <button onClick={() => setCurrentTab('categories')} className={`py-2 px-4 ${currentTab === 'categories' ? 'border-b-2 border-indigo-500 font-semibold' : 'text-gray-500'}`}>
-                    จัดการหมวดหมู่
-                </button>
-                {userData.role === 'owner' && (
-                    <button onClick={() => setCurrentTab('users')} className={`py-2 px-4 ${currentTab === 'users' ? 'border-b-2 border-indigo-500 font-semibold' : 'text-gray-500'}`}>
-                        จัดการผู้ใช้งาน
+        <div className="space-y-8">
+             <h2 className="text-3xl font-bold text-white">ตั้งค่าระบบ</h2>
+             <div className="bg-gray-800 p-6 rounded-2xl border border-gray-700">
+                <div className="flex border-b border-gray-700 mb-6">
+                    <button onClick={() => setCurrentTab('categories')} className={`py-2 px-4 font-semibold transition-colors ${currentTab === 'categories' ? 'border-b-2 border-purple-500 text-purple-400' : 'text-gray-400 hover:text-white'}`}>
+                        จัดการหมวดหมู่
                     </button>
-                )}
-            </div>
+                    {userData.role === 'owner' && (
+                        <button onClick={() => setCurrentTab('users')} className={`py-2 px-4 font-semibold transition-colors ${currentTab === 'users' ? 'border-b-2 border-purple-500 text-purple-400' : 'text-gray-400 hover:text-white'}`}>
+                            จัดการผู้ใช้งาน
+                        </button>
+                    )}
+                </div>
 
-            {currentTab === 'categories' && <CategorySettings user={user} />}
-            {currentTab === 'users' && userData.role === 'owner' && <UserSettings user={user} showNotification={showNotification} />}
+                {currentTab === 'categories' && <CategorySettings user={user} />}
+                {currentTab === 'users' && userData.role === 'owner' && <UserSettings owner={user} showNotification={showNotification} />}
+             </div>
         </div>
     );
 }
@@ -892,206 +1052,119 @@ function SettingsPage({ user, userData, showNotification }) {
 function CategorySettings({ user }) {
     const [categories, setCategories] = useState([]);
     const [newCategoryName, setNewCategoryName] = useState('');
-    const [showConfirmModal, setShowConfirmModal] = useState(false);
-    const [itemToDelete, setItemToDelete] = useState(null);
     const categoriesCollectionPath = `/artifacts/${appId}/public/data/categories`;
 
     useEffect(() => {
-        const q = query(collection(db, categoriesCollectionPath));
+        const q = query(collection(db, categoriesCollectionPath), orderBy('name'));
         const unsubscribe = onSnapshot(q, snapshot => {
-            setCategories(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()})));
+            setCategories(snapshot.docs.map(doc => ({id: doc.id, name: doc.data().name})));
         });
         return unsubscribe;
     }, []);
 
     const handleAddCategory = async () => {
         if (newCategoryName.trim() === '') return;
-        const newCategory = { name: newCategoryName.trim(), createdAt: Timestamp.now() };
-        const docRef = await addDoc(collection(db, categoriesCollectionPath), newCategory);
-        await logAction(user, 'create_category', { categoryId: docRef.id, name: newCategory.name });
+        const newCategory = { name: newCategoryName.trim() };
+        await addDoc(collection(db, categoriesCollectionPath), newCategory);
+        await logAction(user, 'create_category', newCategory);
         setNewCategoryName('');
     };
 
-    const handleDeleteClick = (id) => {
-        setItemToDelete(id);
-        setShowConfirmModal(true);
+    const handleDeleteCategory = async (id) => {
+        await deleteDoc(doc(db, categoriesCollectionPath, id));
+        await logAction(user, 'delete_category', { categoryId: id });
     };
-
-    const confirmDelete = async () => {
-        if (itemToDelete) {
-            await deleteDoc(doc(db, categoriesCollectionPath, itemToDelete));
-            await logAction(user, 'delete_category', { categoryId: itemToDelete });
-            setItemToDelete(null);
-            setShowConfirmModal(false);
-        }
-    };
-
 
     return (
-        <div className="bg-white p-4 rounded-lg shadow">
-            <ConfirmModal 
-                isOpen={showConfirmModal}
-                onClose={() => setShowConfirmModal(false)}
-                onConfirm={confirmDelete}
-                title="ยืนยันการลบ"
-                message="คุณแน่ใจหรือไม่ว่าต้องการลบหมวดหมู่นี้?"
-                confirmText="ยืนยันการลบ"
-            />
-            <h3 className="text-lg font-semibold mb-3">หมวดหมู่รายรับ-รายจ่าย</h3>
-            <div className="flex gap-2 mb-4">
+        <div className="space-y-4">
+            <h3 className="text-xl font-bold text-white">หมวดหมู่รายรับ-รายจ่าย</h3>
+            <div className="flex gap-2">
                 <input
                     type="text"
                     value={newCategoryName}
                     onChange={e => setNewCategoryName(e.target.value)}
                     placeholder="ชื่อหมวดหมู่ใหม่"
-                    className="flex-grow p-2 border rounded-md"
+                    className="flex-grow p-3 bg-gray-700 border border-gray-600 rounded-lg text-white"
                 />
-                <button onClick={handleAddCategory} className="bg-indigo-600 text-white py-2 px-4 rounded-lg hover:bg-indigo-700">เพิ่ม</button>
+                <button onClick={handleAddCategory} className="bg-purple-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-purple-700">เพิ่ม</button>
             </div>
-            <ul className="space-y-2">
+            <div className="space-y-2">
                 {categories.map(cat => (
-                    <li key={cat.id} className="flex justify-between items-center p-2 bg-gray-50 rounded">
-                        <span>{cat.name}</span>
-                        <button onClick={() => handleDeleteClick(cat.id)} className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4"/></button>
-                    </li>
+                    <div key={cat.id} className="flex justify-between items-center p-3 bg-gray-700/50 rounded-lg">
+                        <span className="text-gray-200">{cat.name}</span>
+                        <button onClick={() => handleDeleteCategory(cat.id)} className="text-gray-500 hover:text-red-500"><Trash2 size={18}/></button>
+                    </div>
                 ))}
-            </ul>
+            </div>
         </div>
     );
 }
 
-function UserSettings({ user, showNotification }) {
+function UserSettings({ owner, showNotification }) {
     const [users, setUsers] = useState([]);
     const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
-    const [userToDelete, setUserToDelete] = useState(null);
-
-    const fetchUsers = useCallback(async () => {
-        const usersCollection = collection(db, 'users');
-        const q = query(usersCollection);
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const userList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            setUsers(userList);
-        });
-        return unsubscribe;
-    }, []);
-
-    useEffect(() => {
-        const unsubscribePromise = fetchUsers();
-        return () => {
-             unsubscribePromise.then(unsub => unsub());
-        }
-    }, [fetchUsers]);
-
-    const handleRoleChange = async (targetUserId, newRole) => {
-        if(user.uid === targetUserId) {
-            showNotification("ไม่สามารถเปลี่ยนสิทธิ์ของตนเองได้", 'error');
-            return;
-        }
-        const userDocRef = doc(db, 'users', targetUserId);
-        await updateDoc(userDocRef, { role: newRole });
-        await logAction(user, 'permission_change', { targetUserId, newRole });
-        showNotification("เปลี่ยนสิทธิ์ผู้ใช้สำเร็จ");
-    };
-
-    const handleResetPassword = async (email) => {
-        try {
-            await sendPasswordResetEmail(auth, email);
-            await logAction(user, 'reset_password_request', { targetEmail: email });
-            showNotification(`ส่งอีเมลรีเซ็ตรหัสผ่านไปที่ ${email} แล้ว`);
-        } catch (error) {
-            console.error("Error sending password reset email:", error);
-            showNotification("เกิดข้อผิดพลาดในการส่งอีเมล", 'error');
-        }
-    };
-
-    const handleDeleteClick = (user) => {
-        setUserToDelete(user);
-    };
-
-    const confirmDeleteUser = async () => {
-        if (!userToDelete) return;
-        
-        const deleteUserFunc = httpsCallable(functions, 'deleteUser');
-        try {
-            await deleteUserFunc({ uid: userToDelete.id });
-            await logAction(user, 'delete_user_success', { targetUserId: userToDelete.id, targetEmail: userToDelete.email });
-            showNotification(`ลบผู้ใช้ ${userToDelete.email} สำเร็จ`);
-            setUserToDelete(null);
-        } catch(error) {
-            console.error("Error deleting user:", error);
-            showNotification(error.message || "เกิดข้อผิดพลาดในการลบผู้ใช้", 'error');
-            setUserToDelete(null);
-        }
-    };
     
+    useEffect(() => {
+        const q = query(collection(db, 'users'));
+        const unsub = onSnapshot(q, (snapshot) => {
+            setUsers(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()})));
+        });
+        return unsub;
+    }, []);
+    
+    const handleRoleChange = async (targetUserId, newRole) => {
+        if (owner.uid === targetUserId) {
+            showNotification("ไม่สามารถเปลี่ยนสิทธิ์ของตนเองได้", 'error'); return;
+        }
+        await updateDoc(doc(db, 'users', targetUserId), { role: newRole });
+        await logAction(owner, 'permission_change', { targetUserId, newRole });
+        showNotification("เปลี่ยนสิทธิ์ผู้ใช้สำเร็จ", 'success');
+    };
+
+    const handleDeleteUserDoc = async (targetUserId) => {
+        if (owner.uid === targetUserId) {
+             showNotification("ไม่สามารถลบข้อมูลตนเองได้", 'error'); return;
+        }
+        await deleteDoc(doc(db, 'users', targetUserId));
+        await logAction(owner, 'delete_user_doc', { targetUserId });
+        showNotification("ลบเอกสารข้อมูลผู้ใช้แล้ว", 'success');
+        alert("ลบเอกสารข้อมูลผู้ใช้เรียบร้อยแล้ว\n\nขั้นตอนต่อไป:\nกรุณาไปที่ Firebase Console > Authentication เพื่อลบบัญชีผู้ใช้นี้ออกจากระบบอย่างถาวร");
+    }
+
     return (
-        <div className="bg-white p-4 rounded-lg shadow">
-            {isAddUserModalOpen && (
-                <AddUserModal
-                    isOpen={isAddUserModalOpen}
-                    onClose={() => setIsAddUserModalOpen(false)}
-                    showNotification={showNotification}
-                    currentUser={user}
-                />
-            )}
-            <ConfirmModal
-                isOpen={!!userToDelete}
-                onClose={() => setUserToDelete(null)}
-                onConfirm={confirmDeleteUser}
-                title="ยืนยันการลบผู้ใช้"
-                message={`คุณแน่ใจหรือไม่ว่าต้องการลบผู้ใช้ ${userToDelete?.email} ออกจากระบบทั้งหมด? การกระทำนี้ไม่สามารถย้อนกลับได้`}
-                confirmText="ยืนยันการลบ"
-            />
-            <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold">รายชื่อผู้ใช้งานในระบบ</h3>
-                <button onClick={() => setIsAddUserModalOpen(true)} className="flex items-center bg-indigo-600 text-white py-2 px-4 rounded-lg hover:bg-indigo-700">
-                    <UserPlus className="w-5 h-5 mr-2" />
-                    เพิ่มผู้ใช้ใหม่
-                </button>
+        <div className="space-y-4">
+            {isAddUserModalOpen && <AddUserModal isOpen={isAddUserModalOpen} onClose={() => setIsAddUserModalOpen(false)} showNotification={showNotification} owner={owner} />}
+            <div className="bg-purple-900/30 border border-purple-700 text-purple-300 p-4 rounded-lg">
+                <h4 className="font-bold">คำแนะนำในการจัดการผู้ใช้</h4>
+                <p className="text-sm mt-1">เนื่องจากข้อจำกัดด้านความปลอดภัย การเพิ่ม/ลบผู้ใช้จะทำงานร่วมกันระหว่างหน้าเว็บนี้และ Firebase Console</p>
+            </div>
+            <div className="flex justify-between items-center">
+                 <h3 className="text-xl font-bold text-white">รายชื่อผู้ใช้งาน</h3>
+                 <button onClick={() => setIsAddUserModalOpen(true)} className="flex items-center bg-purple-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-purple-700"><UserPlus className="mr-2"/>เพิ่มผู้ใช้</button>
             </div>
              <div className="overflow-x-auto">
                 <table className="w-full text-left">
-                    <thead>
-                        <tr className="border-b">
-                            <th className="p-2">อีเมล</th>
-                            <th className="p-2">ชื่อ</th>
-                            <th className="p-2">สิทธิ์</th>
-                            <th className="p-2 text-center">จัดการ</th>
+                    <thead className="border-b border-gray-700">
+                        <tr>
+                            <th className="p-3">อีเมล / ชื่อ</th>
+                            <th className="p-3">สิทธิ์</th>
+                            <th className="p-3 text-center">จัดการ</th>
                         </tr>
                     </thead>
                     <tbody>
                         {users.map(u => (
-                            <tr key={u.id} className="border-b hover:bg-gray-50">
-                                <td className="p-2">{u.email}</td>
-                                <td className="p-2">{u.displayName}</td>
-                                <td className="p-2">
-                                     <select 
-                                        value={u.role} 
-                                        onChange={(e) => handleRoleChange(u.id, e.target.value)} 
-                                        className="p-1 border rounded-md bg-white disabled:bg-gray-100"
-                                        disabled={user.uid === u.id || u.role === 'owner'}
-                                    >
-                                        <option value="staff">Staff</option>
+                            <tr key={u.id} className="border-b border-gray-700/50 hover:bg-gray-700/50">
+                                <td className="p-3"><p className="font-semibold text-white">{u.displayName}</p><p className="text-sm text-gray-400">{u.email}</p></td>
+                                <td className="p-3">
+                                     <select value={u.role} onChange={(e) => handleRoleChange(u.id, e.target.value)} className="p-2 bg-gray-700 border border-gray-600 rounded-md disabled:opacity-50" disabled={owner.uid === u.id || u.role === 'owner'}>
+                                        <option value="owner">Owner</option>
                                         <option value="admin">Admin</option>
+                                        <option value="staff">Staff</option>
                                     </select>
                                 </td>
-                                <td className="p-2 text-center space-x-2">
-                                    <button 
-                                        onClick={() => handleResetPassword(u.email)} 
-                                        className="text-gray-500 hover:text-blue-600 p-1 disabled:opacity-50"
-                                        title="รีเซ็ตรหัสผ่าน"
-                                        disabled={user.uid === u.id}
-                                    >
-                                        <KeyRound className="w-4 h-4"/>
-                                    </button>
-                                    <button 
-                                        onClick={() => handleDeleteClick(u)} 
-                                        className="text-gray-500 hover:text-red-600 p-1 disabled:opacity-50"
-                                        title="ลบผู้ใช้"
-                                        disabled={user.uid === u.id || u.role === 'owner'}
-                                    >
-                                        <Trash2 className="w-4 h-4"/>
-                                    </button>
+                                <td className="p-3 text-center space-x-2">
+                                    <button onClick={() => sendPasswordResetEmail(auth, u.email)} className="p-2 text-gray-400 hover:text-blue-400" title="รีเซ็ตรหัสผ่าน"><KeyRound/></button>
+                                    <button onClick={() => handleDeleteUserDoc(u.id)} className="p-2 text-gray-400 hover:text-red-400 disabled:opacity-50" title="ลบผู้ใช้" disabled={owner.uid === u.id || u.role === 'owner'}><Trash2/></button>
                                 </td>
                             </tr>
                         ))}
@@ -1102,88 +1175,76 @@ function UserSettings({ user, showNotification }) {
     );
 }
 
-function AddUserModal({ isOpen, onClose, showNotification, currentUser }) {
+function AddUserModal({ isOpen, onClose, showNotification, owner }) {
     const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
     const [displayName, setDisplayName] = useState('');
     const [role, setRole] = useState('staff');
     const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState('');
+    const [isCreated, setIsCreated] = useState(false);
 
-    const handleCreateUser = async (e) => {
+    const handleCreateUserRecord = async (e) => {
         e.preventDefault();
-        setError('');
         setIsLoading(true);
-
-        const createUserFunc = httpsCallable(functions, 'createUser');
+        const userRecord = {
+            email, displayName, role, photoURL: '', createdAt: Timestamp.now()
+        };
         try {
-            const result = await createUserFunc({
-                email,
-                password,
-                displayName,
-                role
-            });
-
-            if (result.data.success) {
-                await logAction(currentUser, 'create_user_success', { newUserEmail: email, role: role });
-                showNotification(`สร้างผู้ใช้ ${email} สำเร็จ`);
-                onClose();
-            } else {
-                 throw new Error(result.data.error.message || 'An unknown error occurred.');
-            }
-        } catch (err) {
-            console.error("Error calling createUser function:", err);
-            setError(err.message || "เกิดข้อผิดพลาดในการสร้างผู้ใช้");
-            showNotification(err.message || "เกิดข้อผิดพลาด", 'error');
+            // This does NOT create an auth user, only a firestore doc.
+            // We use the email as a temporary doc ID until the user logs in and we get their real UID.
+            // A more robust system would use a backend to create both.
+            await setDoc(doc(db, "users_pending", email), userRecord);
+            await logAction(owner, 'create_user_record', userRecord);
+            showNotification("สร้างข้อมูลผู้ใช้สำเร็จ!", 'success');
+            setIsCreated(true);
+        } catch(err) {
+            showNotification("เกิดข้อผิดพลาดในการสร้างข้อมูล", 'error');
+            console.error(err);
         } finally {
             setIsLoading(false);
         }
     };
     
-    if(!isOpen) return null;
+    const handleClose = () => {
+        setIsCreated(false);
+        onClose();
+    }
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
-             <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md">
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-bold">เพิ่มผู้ใช้ใหม่</h3>
-                    <button onClick={onClose}><X className="w-6 h-6"/></button>
+        <Modal isOpen={isOpen} onClose={handleClose} title="เพิ่มผู้ใช้ใหม่">
+            {isCreated ? (
+                <div className="text-center space-y-4">
+                     <CheckCircle className="mx-auto h-16 w-16 text-green-400"/>
+                     <h4 className="text-xl font-bold text-white">สร้างข้อมูลผู้ใช้สำเร็จ</h4>
+                     <div className="bg-gray-700 p-4 rounded-lg text-left text-sm space-y-2">
+                        <p className="font-bold">ขั้นตอนต่อไป (สำคัญมาก):</p>
+                        <p>1. ไปที่ <b className="text-purple-400">Firebase Console</b></p>
+                        <p>2. ไปที่เมนู <b className="text-purple-400">Authentication</b></p>
+                        <p>3. กดปุ่ม <b className="text-purple-400">Add user</b> และใช้อีเมล: <b className="text-yellow-400">{email}</b></p>
+                        <p>4. ตั้งรหัสผ่านชั่วคราวแล้วแจ้งให้ผู้ใช้ทราบ</p>
+                        <p>5. เมื่อผู้ใช้ล็อกอินครั้งแรก ระบบจะเชื่อมข้อมูลให้โดยอัตโนมัติ</p>
+                     </div>
+                     <button onClick={handleClose} className="w-full py-3 mt-4 bg-purple-600 hover:bg-purple-700 rounded-lg">เสร็จสิ้น</button>
                 </div>
-                 <form onSubmit={handleCreateUser} className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium">อีเมล</label>
-                        <input type="email" value={email} onChange={e => setEmail(e.target.value)} required className="mt-1 w-full p-2 border rounded"/>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium">รหัสผ่านชั่วคราว (อย่างน้อย 6 ตัวอักษร)</label>
-                        <input type="password" value={password} onChange={e => setPassword(e.target.value)} required className="mt-1 w-full p-2 border rounded"/>
-                    </div>
-                     <div>
-                        <label className="block text-sm font-medium">ชื่อที่แสดง</label>
-                        <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} required className="mt-1 w-full p-2 border rounded"/>
-                    </div>
-                     <div>
-                        <label className="block text-sm font-medium">สิทธิ์การใช้งาน</label>
-                        <select value={role} onChange={e => setRole(e.target.value)} className="mt-1 w-full p-2 border rounded bg-white">
-                            <option value="staff">Staff</option>
-                            <option value="admin">Admin</option>
-                        </select>
-                    </div>
-                    {error && <p className="text-red-500 text-sm">{error}</p>}
-                    <div className="flex justify-end space-x-2 pt-4">
-                        <button type="button" onClick={onClose} className="py-2 px-4 bg-gray-200 rounded-lg">ยกเลิก</button>
-                        <button type="submit" disabled={isLoading} className="py-2 px-4 bg-indigo-600 text-white rounded-lg disabled:bg-indigo-300">
-                             {isLoading ? "กำลังสร้าง..." : "สร้างผู้ใช้"}
-                        </button>
-                    </div>
+            ) : (
+                 <form onSubmit={handleCreateUserRecord} className="space-y-4">
+                    <p className="text-sm text-gray-400">ขั้นตอนนี้จะสร้าง "เอกสารข้อมูล" สำหรับผู้ใช้ใหม่ในระบบก่อน</p>
+                    <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="อีเมลผู้ใช้ใหม่" required className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/>
+                    <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="ชื่อที่แสดง" required className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/>
+                    <select value={role} onChange={e => setRole(e.target.value)} className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg">
+                        <option value="staff">Staff</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                    <button type="submit" disabled={isLoading} className="w-full py-3 bg-purple-600 hover:bg-purple-700 rounded-lg disabled:bg-gray-500">
+                         {isLoading ? "กำลังสร้างข้อมูล..." : "สร้างข้อมูลผู้ใช้ (ขั้นตอนที่ 1)"}
+                    </button>
                 </form>
-            </div>
-        </div>
+            )}
+        </Modal>
     );
 }
 
 
-function ProfilePage({ user, userData }) {
+function ProfilePage({ user, userData, showNotification }) {
     const [displayName, setDisplayName] = useState(userData.displayName || '');
     const [currentPassword, setCurrentPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
@@ -1206,10 +1267,10 @@ function ProfilePage({ user, userData }) {
             
             await updateDoc(doc(db, 'users', user.uid), { displayName, photoURL });
             await logAction(user, 'update_profile', { displayName, photoURL: !!photoURL });
-            setMessage('อัปเดตโปรไฟล์สำเร็จ');
+            showNotification('อัปเดตโปรไฟล์สำเร็จ!', 'success');
         } catch(error) {
             console.error(error);
-            setMessage('เกิดข้อผิดพลาดในการอัปเดตโปรไฟล์');
+            showNotification('เกิดข้อผิดพลาดในการอัปเดตโปรไฟล์', 'error');
         } finally {
             setIsUploading(false);
         }
@@ -1219,12 +1280,10 @@ function ProfilePage({ user, userData }) {
         e.preventDefault();
         setMessage('');
         if (newPassword !== confirmPassword) {
-            setMessage('รหัสผ่านใหม่ไม่ตรงกัน');
-            return;
+            showNotification('รหัสผ่านใหม่ไม่ตรงกัน', 'error'); return;
         }
         if (newPassword.length < 6) {
-            setMessage('รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร');
-            return;
+            showNotification('รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร', 'error'); return;
         }
 
         try {
@@ -1232,69 +1291,82 @@ function ProfilePage({ user, userData }) {
             await reauthenticateWithCredential(user, credential);
             await updatePassword(user, newPassword);
             await logAction(user, 'change_password');
-            setMessage('เปลี่ยนรหัสผ่านสำเร็จ');
-            setCurrentPassword('');
-            setNewPassword('');
-            setConfirmPassword('');
+            showNotification('เปลี่ยนรหัสผ่านสำเร็จ!', 'success');
+            setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
         } catch (error) {
             console.error(error);
-            setMessage('เกิดข้อผิดพลาด: รหัสผ่านปัจจุบันอาจไม่ถูกต้อง');
+            showNotification('เกิดข้อผิดพลาด: รหัสผ่านปัจจุบันอาจไม่ถูกต้อง', 'error');
         }
     };
 
     return (
-        <div>
-            <h2 className="text-2xl font-bold mb-6">โปรไฟล์ของฉัน</h2>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white p-6 rounded-lg shadow">
-                    <h3 className="text-lg font-semibold mb-4">ข้อมูลส่วนตัว</h3>
-                    <div className="text-center mb-4">
-                        <img 
-                            className="w-24 h-24 rounded-full mx-auto object-cover"
-                            src={userData?.photoURL || `https://placehold.co/96x96/E2E8F0/4A5568?text=${(userData?.displayName || 'U').charAt(0)}`}
-                            alt="Profile"
-                        />
-                    </div>
+        <div className="space-y-8">
+            <h2 className="text-3xl font-bold text-white">โปรไฟล์ของฉัน</h2>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="bg-gray-800 p-6 rounded-2xl border border-gray-700">
+                    <h3 className="text-xl font-semibold mb-4 text-purple-400">ข้อมูลส่วนตัว</h3>
                     <form onSubmit={handleProfileUpdate} className="space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700">ชื่อที่แสดง</label>
-                            <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} className="mt-1 block w-full p-2 border rounded-md"/>
+                        <div className="text-center mb-4">
+                            <img 
+                                className="w-28 h-28 rounded-full mx-auto object-cover border-4 border-purple-500"
+                                src={userData?.photoURL || `https://placehold.co/112x112/1F2937/A78BFA?text=${(userData?.displayName || 'U').charAt(0).toUpperCase()}`}
+                                alt="Profile"
+                            />
+                             <input type="file" id="photo-upload" onChange={e => setPhoto(e.target.files[0])} accept="image/png, image/jpeg" className="hidden"/>
+                             <label htmlFor="photo-upload" className="mt-4 inline-block bg-gray-700 hover:bg-gray-600 text-sm text-gray-200 py-2 px-4 rounded-lg cursor-pointer">เปลี่ยนรูปโปรไฟล์</label>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700">เปลี่ยนรูปโปรไฟล์</label>
-                            <input type="file" onChange={e => setPhoto(e.target.files[0])} accept="image/png, image/jpeg" className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"/>
+                            <label className="block text-sm font-medium text-gray-400">ชื่อที่แสดง</label>
+                            <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} className="mt-1 w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/>
                         </div>
-                         <button type="submit" disabled={isUploading} className="w-full py-2 px-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-indigo-400">
+                         <button type="submit" disabled={isUploading} className="w-full py-3 bg-purple-600 hover:bg-purple-700 rounded-lg disabled:bg-gray-500">
                              {isUploading ? 'กำลังบันทึก...' : 'บันทึกข้อมูลส่วนตัว'}
                         </button>
                     </form>
-                    <div className="mt-4 border-t pt-4">
-                        <p><strong className="font-medium">อีเมล:</strong> {userData.email}</p>
-                        <p><strong className="font-medium">สิทธิ์การใช้งาน:</strong> <span className="capitalize">{userData.role}</span></p>
+                    <div className="mt-6 border-t border-gray-700 pt-4 space-y-2">
+                        <p><strong className="font-medium text-gray-400">อีเมล:</strong> {userData.email}</p>
+                        <p><strong className="font-medium text-gray-400">สิทธิ์:</strong> <span className="capitalize font-bold text-purple-400">{userData.role}</span></p>
                     </div>
                 </div>
-                <div className="bg-white p-6 rounded-lg shadow">
-                    <h3 className="text-lg font-semibold mb-4">เปลี่ยนรหัสผ่าน</h3>
+                <div className="bg-gray-800 p-6 rounded-2xl border border-gray-700">
+                    <h3 className="text-xl font-semibold mb-4 text-purple-400">เปลี่ยนรหัสผ่าน</h3>
                     <form onSubmit={handlePasswordChange} className="space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700">รหัสผ่านปัจจุบัน</label>
-                            <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} required className="mt-1 block w-full p-2 border rounded-md"/>
+                         <div>
+                            <label className="block text-sm font-medium text-gray-400">รหัสผ่านปัจจุบัน</label>
+                            <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} required className="mt-1 w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700">รหัสผ่านใหม่</label>
-                            <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} required className="mt-1 block w-full p-2 border rounded-md"/>
+                            <label className="block text-sm font-medium text-gray-400">รหัสผ่านใหม่</label>
+                            <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} required className="mt-1 w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700">ยืนยันรหัสผ่านใหม่</label>
-                            <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required className="mt-1 block w-full p-2 border rounded-md"/>
+                            <label className="block text-sm font-medium text-gray-400">ยืนยันรหัสผ่านใหม่</label>
+                            <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required className="mt-1 w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/>
                         </div>
-                         <button type="submit" className="w-full py-2 px-4 bg-gray-700 text-white rounded-lg hover:bg-gray-800">เปลี่ยนรหัสผ่าน</button>
+                         <button type="submit" className="w-full py-3 bg-red-600 hover:bg-red-700 rounded-lg">เปลี่ยนรหัสผ่าน</button>
                     </form>
                 </div>
             </div>
-            {message && <div className="mt-4 p-3 rounded-md bg-blue-100 text-blue-800">{message}</div>}
         </div>
     );
+}
+
+function LogDetailView({ detailsString }) {
+    try {
+        const details = JSON.parse(detailsString);
+        return (
+            <div className="bg-gray-900 p-2 rounded-md font-mono text-xs">
+                {Object.entries(details).map(([key, value]) => (
+                    <div key={key} className="flex">
+                        <span className="text-purple-400 w-32 flex-shrink-0">{key}:</span>
+                        <span className="text-gray-300 break-all">{typeof value === 'object' ? JSON.stringify(value) : String(value)}</span>
+                    </div>
+                ))}
+            </div>
+        )
+    } catch (e) {
+        return <span className="text-gray-500">{detailsString}</span>;
+    }
 }
 
 function LogsPage() {
@@ -1302,7 +1374,7 @@ function LogsPage() {
     const logCollectionPath = `/artifacts/${appId}/public/data/logs`;
 
     useEffect(() => {
-        const q = query(collection(db, logCollectionPath), orderBy('timestamp', 'desc'));
+        const q = query(collection(db, logCollectionPath), orderBy('timestamp', 'desc'), limit(50));
         const unsubscribe = onSnapshot(q, (snapshot) => {
             setLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         });
@@ -1311,50 +1383,51 @@ function LogsPage() {
 
     const formatAction = (action) => {
         const actions = {
-            login: 'เข้าสู่ระบบ',
-            logout: 'ออกจากระบบ',
-            create_transaction: 'สร้างรายการการเงิน',
-            update_transaction: 'อัปเดตรายการการเงิน',
-            delete_transaction: 'ลบรายการการเงิน',
-            create_category: 'สร้างหมวดหมู่',
-            delete_category: 'ลบหมวดหมู่',
-            permission_change: 'เปลี่ยนสิทธิ์ผู้ใช้',
-            update_profile: 'อัปเดตโปรไฟล์',
-            change_password: 'เปลี่ยนรหัสผ่าน',
-            export_report_csv: 'ส่งออกรายงาน CSV',
-            reset_password_request: 'ส่งคำขอรีเซ็ตรหัสผ่าน',
-            delete_user: 'ลบบัญชีผู้ใช้ (Firestore)',
-            create_user_record: 'สร้างข้อมูลผู้ใช้ (Firestore)',
-            create_user_success: 'สร้างผู้ใช้ใหม่สำเร็จ',
-            delete_user_success: 'ลบผู้ใช้สำเร็จ'
+            login_success: 'เข้าสู่ระบบสำเร็จ', logout: 'ออกจากระบบ', login_failed: 'เข้าระบบล้มเหลว',
+            create_transaction: 'สร้างรายการเงิน', delete_transaction: 'ลบรายการเงิน',
+            create_category: 'สร้างหมวดหมู่', delete_category: 'ลบหมวดหมู่',
+            create_event: 'สร้างกิจกรรม',
+            permission_change: 'เปลี่ยนสิทธิ์',
+            update_profile: 'อัปเดตโปรไฟล์', change_password: 'เปลี่ยนรหัสผ่าน',
+            export_report_csv: 'ส่งออก CSV', reset_password_request: 'ขอรีเซ็ตรหัสผ่าน',
+            delete_user_doc: 'ลบข้อมูลผู้ใช้', create_user_record: 'สร้างข้อมูลผู้ใช้',
         };
-        return actions[action] || action;
+        const actionStyle = {
+            login_success: 'bg-green-500/20 text-green-400',
+            logout: 'bg-yellow-500/20 text-yellow-400',
+            login_failed: 'bg-red-500/20 text-red-400',
+            create_transaction: 'bg-blue-500/20 text-blue-400',
+            delete_transaction: 'bg-red-500/20 text-red-400',
+        }
+        return <span className={`px-2 py-1 rounded-full text-xs font-semibold ${actionStyle[action] || 'bg-gray-500/20 text-gray-400'}`}>{actions[action] || action}</span>;
     }
 
     return (
-        <div>
-            <h2 className="text-2xl font-bold mb-6">ประวัติการใช้งานระบบ</h2>
-            <div className="bg-white p-4 rounded-lg shadow overflow-x-auto">
-                <table className="w-full text-left">
-                    <thead>
-                        <tr className="border-b">
-                            <th className="p-2">เวลา</th>
-                            <th className="p-2">ผู้ใช้งาน</th>
-                            <th className="p-2">การกระทำ</th>
-                            <th className="p-2">รายละเอียด</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {logs.map(log => (
-                            <tr key={log.id} className="border-b hover:bg-gray-50">
-                                <td className="p-2 whitespace-nowrap">{new Date(log.timestamp.seconds * 1000).toLocaleString('th-TH')}</td>
-                                <td className="p-2">{log.userEmail}</td>
-                                <td className="p-2">{formatAction(log.action)}</td>
-                                <td className="p-2 text-sm text-gray-600 break-all">{log.details}</td>
+        <div className="space-y-6">
+            <h2 className="text-3xl font-bold text-white">ประวัติการใช้งานระบบ</h2>
+            <div className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                        <thead className="bg-gray-700/50">
+                            <tr>
+                                <th className="p-3 text-sm font-semibold text-gray-300">เวลา</th>
+                                <th className="p-3 text-sm font-semibold text-gray-300">ผู้ใช้งาน</th>
+                                <th className="p-3 text-sm font-semibold text-gray-300">การกระทำ</th>
+                                <th className="p-3 text-sm font-semibold text-gray-300">รายละเอียด</th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {logs.map(log => (
+                                <tr key={log.id} className="border-t border-gray-700">
+                                    <td className="p-3 whitespace-nowrap text-sm text-gray-400">{formatFullDate(log.timestamp)}</td>
+                                    <td className="p-3 text-sm text-gray-300">{log.userEmail}</td>
+                                    <td className="p-3">{formatAction(log.action)}</td>
+                                    <td className="p-3"><LogDetailView detailsString={log.details} /></td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     );
