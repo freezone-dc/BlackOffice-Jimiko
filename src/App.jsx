@@ -62,8 +62,9 @@ import {
 
 // --- Firebase Configuration ---
 const firebaseConfig = {
-  apiKey: "AIzaSyDLP8ZGO0YtzGHl7gp60D0MlyyoV-UVVrs",
+  apiKey: "AIzaSyDLP8ZGO0YtzGH17gp60d0M1yyoV-UVVrs",
   authDomain: "blackoffice-jimiko.firebaseapp.com",
+  databaseURL: "https://blackoffice-jimiko-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "blackoffice-jimiko",
   storageBucket: "blackoffice-jimiko.appspot.com",
   messagingSenderId: "881411328219",
@@ -1128,7 +1129,8 @@ function UserSettings({ owner, showNotification }) {
         await deleteDoc(doc(db, 'users', targetUserId));
         await logAction(owner, 'delete_user_doc', { targetUserId });
         showNotification("ลบเอกสารข้อมูลผู้ใช้แล้ว", 'success');
-        alert("ลบเอกสารข้อมูลผู้ใช้เรียบร้อยแล้ว\n\nขั้นตอนต่อไป:\nกรุณาไปที่ Firebase Console > Authentication เพื่อลบบัญชีผู้ใช้นี้ออกจากระบบอย่างถาวร");
+        // A non-blocking alert is better than window.alert
+        showNotification("ขั้นตอนต่อไป: ไปที่ Firebase Console เพื่อลบบัญชี", "info");
     }
 
     return (
@@ -1136,7 +1138,7 @@ function UserSettings({ owner, showNotification }) {
             {isAddUserModalOpen && <AddUserModal isOpen={isAddUserModalOpen} onClose={() => setIsAddUserModalOpen(false)} showNotification={showNotification} owner={owner} />}
             <div className="bg-purple-900/30 border border-purple-700 text-purple-300 p-4 rounded-lg">
                 <h4 className="font-bold">คำแนะนำในการจัดการผู้ใช้</h4>
-                <p className="text-sm mt-1">เนื่องจากข้อจำกัดด้านความปลอดภัย การเพิ่ม/ลบผู้ใช้จะทำงานร่วมกันระหว่างหน้าเว็บนี้และ Firebase Console</p>
+                <p className="text-sm mt-1">การเพิ่ม/ลบผู้ใช้ จะเป็นการสร้าง/ลบเฉพาะ "ข้อมูล" ในระบบเท่านั้น คุณต้องไปสร้าง/ลบบัญชีจริงใน Firebase Console ด้วยตนเอง</p>
             </div>
             <div className="flex justify-between items-center">
                  <h3 className="text-xl font-bold text-white">รายชื่อผู้ใช้งาน</h3>
@@ -1189,10 +1191,8 @@ function AddUserModal({ isOpen, onClose, showNotification, owner }) {
             email, displayName, role, photoURL: '', createdAt: Timestamp.now()
         };
         try {
-            // This does NOT create an auth user, only a firestore doc.
-            // We use the email as a temporary doc ID until the user logs in and we get their real UID.
-            // A more robust system would use a backend to create both.
-            await setDoc(doc(db, "users_pending", email), userRecord);
+            // We use the email as a temporary doc ID
+            await setDoc(doc(db, "users", email), userRecord, { merge: true }); // Using email as temp ID is a workaround
             await logAction(owner, 'create_user_record', userRecord);
             showNotification("สร้างข้อมูลผู้ใช้สำเร็จ!", 'success');
             setIsCreated(true);
@@ -1221,7 +1221,7 @@ function AddUserModal({ isOpen, onClose, showNotification, owner }) {
                         <p>2. ไปที่เมนู <b className="text-purple-400">Authentication</b></p>
                         <p>3. กดปุ่ม <b className="text-purple-400">Add user</b> และใช้อีเมล: <b className="text-yellow-400">{email}</b></p>
                         <p>4. ตั้งรหัสผ่านชั่วคราวแล้วแจ้งให้ผู้ใช้ทราบ</p>
-                        <p>5. เมื่อผู้ใช้ล็อกอินครั้งแรก ระบบจะเชื่อมข้อมูลให้โดยอัตโนมัติ</p>
+                        <p>5. เมื่อผู้ใช้ล็อกอินครั้งแรก ระบบจะตรวจหา UID และอัปเดตเอกสารข้อมูลให้ถูกต้อง</p>
                      </div>
                      <button onClick={handleClose} className="w-full py-3 mt-4 bg-purple-600 hover:bg-purple-700 rounded-lg">เสร็จสิ้น</button>
                 </div>
