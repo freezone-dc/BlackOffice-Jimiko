@@ -22,34 +22,13 @@ import {
     uploadBytesResumable, 
     getDownloadURL 
 } from 'firebase/storage';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
+import * as XLSX from 'xlsx'; // New library for Excel export
 import { 
-    Home,
-    DollarSign, 
-    Calendar, 
-    BarChart2 as ReportIcon, 
-    Settings, 
-    User, 
-    LogOut, 
-    Plus,
-    Trash2,
-    FileText,
-    X,
-    Menu,
-    Users,
-    History,
-    AlertTriangle,
-    KeyRound,
-    UserPlus,
-    ChevronLeft,
-    ChevronRight,
-    UploadCloud,
-    CheckCircle,
-    Eye,
-    EyeOff,
-    Edit,
-    Image as ImageIcon,
-    Search
+    Home, DollarSign, Calendar, BarChart2 as ReportIcon, Settings, User, LogOut, 
+    Plus, Trash2, FileText, X, Menu, Users, History, AlertTriangle, KeyRound, 
+    UserPlus, ChevronLeft, ChevronRight, UploadCloud, CheckCircle, Eye, EyeOff, 
+    Edit, Image as ImageIcon, Search, Download, FileSpreadsheet
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -77,6 +56,7 @@ const encodePass = (str) => btoa(str);
 // --- Helper Functions ---
 const formatCurrency = (amount) => new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB', maximumFractionDigits: 0 }).format(amount);
 const formatFullDate = (date) => date ? new Date(date.seconds * 1000).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short'}) : 'N/A';
+const formatShortDate = (date) => date ? new Date(date.seconds * 1000).toLocaleDateString('th-TH') : 'N/A';
 
 const logAction = async (user, action, details = {}) => {
     try {
@@ -90,9 +70,14 @@ const logAction = async (user, action, details = {}) => {
         };
         const logCollectionPath = `/artifacts/${appId}/public/data/logs`;
         await addDoc(collection(db, logCollectionPath), logData);
-    } catch (error) {
-        console.error("Error logging action:", error);
-    }
+    } catch (error) { console.error("Error logging action:", error); }
+};
+
+const exportToExcel = (data, fileName) => {
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Sheet1");
+    XLSX.writeFile(workbook, `${fileName}.xlsx`);
 };
 
 // --- Reusable Components ---
@@ -121,9 +106,7 @@ export default function App() {
 
     useEffect(() => {
         const storedUser = sessionStorage.getItem('blackoffice_user');
-        if (storedUser) {
-            setCurrentUser(JSON.parse(storedUser));
-        }
+        if (storedUser) setCurrentUser(JSON.parse(storedUser));
         setIsLoading(false);
     }, []);
     
@@ -155,43 +138,17 @@ export default function App() {
       setIsSidebarOpen(false);
     }
 
-    if (isLoading) {
-        return <div className="flex items-center justify-center min-h-screen bg-gray-900 text-purple-400"><div className="text-xl font-semibold animate-pulse">กำลังโหลด...</div></div>;
-    }
-
-    if (!currentUser) {
-        return <AuthPage onLoginSuccess={handleLoginSuccess} />;
-    }
+    if (isLoading) return <div className="flex items-center justify-center min-h-screen bg-gray-900 text-purple-400"><div className="text-xl font-semibold animate-pulse">กำลังโหลด...</div></div>;
+    if (!currentUser) return <AuthPage onLoginSuccess={handleLoginSuccess} />;
 
     return (
         <div className="flex h-screen bg-gray-900 text-gray-200 font-sans">
-            {notification.show && (
-                <div className={`fixed top-5 right-5 text-white py-2 px-4 rounded-lg shadow-2xl z-[100] ${notification.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
-                    {notification.message}
-                </div>
-            )}
-            <Sidebar 
-                currentPage={currentPage} 
-                navigateTo={navigateTo}
-                userRole={currentUser?.role}
-                isSidebarOpen={isSidebarOpen}
-                setIsSidebarOpen={setIsSidebarOpen}
-            />
+            {notification.show && (<div className={`fixed top-5 right-5 text-white py-2 px-4 rounded-lg shadow-2xl z-[100] ${notification.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{notification.message}</div>)}
+            <Sidebar currentPage={currentPage} navigateTo={navigateTo} userRole={currentUser?.role} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen}/>
             <div className="flex-1 flex flex-col overflow-hidden">
-                <Header 
-                    userData={currentUser}
-                    handleLogout={handleLogout} 
-                    setIsSidebarOpen={setIsSidebarOpen}
-                />
+                <Header userData={currentUser} handleLogout={handleLogout} setIsSidebarOpen={setIsSidebarOpen}/>
                 <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-900 p-4 sm:p-6 lg:p-8">
-                    <PageContent 
-                        page={currentPage} 
-                        user={currentUser} 
-                        userData={currentUser} 
-                        showNotification={showNotification}
-                        navigateTo={navigateTo}
-                        onProfileUpdate={handleProfileUpdate}
-                    />
+                    <PageContent page={currentPage} user={currentUser} userData={currentUser} showNotification={showNotification} navigateTo={navigateTo} onProfileUpdate={handleProfileUpdate}/>
                 </main>
             </div>
         </div>
@@ -206,55 +163,31 @@ function AuthPage({ onLoginSuccess }) {
     const [isLoading, setIsLoading] = useState(false);
 
     const handleLogin = async (e) => {
-        e.preventDefault();
-        setError(''); setIsLoading(true);
+        e.preventDefault(); setError(''); setIsLoading(true);
         try {
             const usersRef = collection(db, "users");
             const q = query(usersRef, where("username", "==", username.toLowerCase()));
             const querySnapshot = await getDocs(q);
-
             if (querySnapshot.empty) throw new Error("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง");
-            
-            let userDoc = querySnapshot.docs[0];
+            const userDoc = querySnapshot.docs[0];
             const userData = { id: userDoc.id, ...userDoc.data() };
-
             if (userData.password === encodePass(password)) {
                 onLoginSuccess(userData);
                 await logAction(userData, 'login_success');
-            } else {
-                throw new Error("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง");
-            }
-        } catch (err) {
-            setError(err.message);
-            await logAction(null, 'login_failed', { username });
-            console.error(err);
-        } finally {
-            setIsLoading(false);
-        }
+            } else { throw new Error("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง"); }
+        } catch (err) { setError(err.message); await logAction(null, 'login_failed', { username }); } 
+        finally { setIsLoading(false); }
     };
 
     return (
         <div className="flex items-center justify-center min-h-screen bg-gray-900 p-4">
             <div className="w-full max-w-sm p-8 space-y-6 bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl shadow-purple-900/20">
-                <div className="text-center">
-                    <h2 className="text-3xl font-bold text-white">BlackOffice <span className="text-purple-400">Jimiko</span></h2>
-                    <p className="text-gray-400 mt-2">โปรแกรมจัดการธุรกิจของคุณ</p>
-                </div>
+                <div className="text-center"><h2 className="text-3xl font-bold text-white">BlackOffice <span className="text-purple-400">Jimiko</span></h2><p className="text-gray-400 mt-2">โปรแกรมจัดการธุรกิจของคุณ</p></div>
                 <form onSubmit={handleLogin} className="space-y-6">
-                    <div>
-                        <label className="text-sm font-bold text-gray-400 block mb-2">ชื่อผู้ใช้ (Username)</label>
-                        <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition" required />
-                    </div>
-                    <div>
-                        <label className="text-sm font-bold text-gray-400 block mb-2">รหัสผ่าน</label>
-                        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition" required />
-                    </div>
+                    <div><label className="text-sm font-bold text-gray-400 block mb-2">ชื่อผู้ใช้ (Username)</label><input type="text" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition" required /></div>
+                    <div><label className="text-sm font-bold text-gray-400 block mb-2">รหัสผ่าน</label><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition" required /></div>
                     {error && <p className="text-red-400 text-sm text-center">{error}</p>}
-                    <div>
-                        <button type="submit" disabled={isLoading} className="w-full py-3 px-4 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg shadow-lg shadow-purple-600/30 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-purple-500 transition-all duration-300 disabled:bg-gray-500 disabled:shadow-none">
-                            {isLoading ? "กำลังตรวจสอบ..." : "เข้าสู่ระบบ"}
-                        </button>
-                    </div>
+                    <div><button type="submit" disabled={isLoading} className="w-full py-3 px-4 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg shadow-lg shadow-purple-600/30 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-purple-500 transition-all duration-300 disabled:bg-gray-500 disabled:shadow-none">{isLoading ? "กำลังตรวจสอบ..." : "เข้าสู่ระบบ"}</button></div>
                 </form>
             </div>
         </div>
@@ -267,31 +200,18 @@ function Sidebar({ currentPage, navigateTo, userRole, isSidebarOpen, setIsSideba
         { id: 'home', label: 'หน้าแรก', icon: Home, roles: ['staff', 'admin', 'owner'] },
         { id: 'finance', label: 'รายรับ-รายจ่าย', icon: DollarSign, roles: ['staff', 'admin', 'owner'] },
         { id: 'calendar', label: 'ปฏิทินงาน', icon: Calendar, roles: ['staff', 'admin', 'owner'] },
-        { id: 'reports', label: 'รายงาน', icon: ReportIcon, roles: ['admin', 'owner'] },
+        { id: 'reports', label: 'รายงานการเงิน', icon: ReportIcon, roles: ['admin', 'owner'] },
+        { id: 'all-finances', label: 'การเงินทั้งหมด', icon: FileSpreadsheet, roles: ['owner'] },
         { id: 'settings', label: 'ตั้งค่า', icon: Settings, roles: ['admin', 'owner'] },
         { id: 'profile', label: 'โปรไฟล์', icon: User, roles: ['staff', 'admin', 'owner'] },
         { id: 'logs', label: 'Log', icon: History, roles: ['owner'] },
     ];
-    
     return (
         <>
             <div className={`fixed inset-0 bg-black bg-opacity-50 z-30 md:hidden ${isSidebarOpen ? 'block' : 'hidden'}`} onClick={() => setIsSidebarOpen(false)}></div>
             <aside className={`bg-gray-800 border-r border-gray-700 text-gray-300 w-64 space-y-2 py-4 px-2 fixed inset-y-0 left-0 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 transition-transform duration-300 ease-in-out z-40`}>
-                <div className="px-4 pb-4 border-b border-gray-700 flex items-center justify-between">
-                    <h1 className="text-xl font-bold text-white">Black<span className="text-purple-400">Office</span></h1>
-                    <button onClick={() => setIsSidebarOpen(false)} className="text-gray-400 hover:text-white md:hidden"><X className="w-6 h-6" /></button>
-                </div>
-                <nav className="flex-grow pt-4">
-                    {userRole && navItems
-                        .filter(item => item.roles.includes(userRole))
-                        .map(item => (
-                        <a key={item.id} href="#" onClick={(e) => { e.preventDefault(); navigateTo(item.id); }}
-                            className={`flex items-center py-3 px-4 rounded-lg transition-all duration-200 mb-1 ${currentPage === item.id ? 'bg-purple-600 text-white shadow-lg' : 'hover:bg-gray-700 hover:text-white'}`}>
-                            <item.icon className="w-5 h-5 mr-3" />
-                            <span className="font-semibold">{item.label}</span>
-                        </a>
-                    ))}
-                </nav>
+                <div className="px-4 pb-4 border-b border-gray-700 flex items-center justify-between"><h1 className="text-xl font-bold text-white">Black<span className="text-purple-400">Office</span></h1><button onClick={() => setIsSidebarOpen(false)} className="text-gray-400 hover:text-white md:hidden"><X className="w-6 h-6" /></button></div>
+                <nav className="flex-grow pt-4">{userRole && navItems.filter(item => item.roles.includes(userRole)).map(item => (<a key={item.id} href="#" onClick={(e) => { e.preventDefault(); navigateTo(item.id); }} className={`flex items-center py-3 px-4 rounded-lg transition-all duration-200 mb-1 ${currentPage === item.id ? 'bg-purple-600 text-white shadow-lg' : 'hover:bg-gray-700 hover:text-white'}`}><item.icon className="w-5 h-5 mr-3" /><span className="font-semibold">{item.label}</span></a>))}</nav>
             </aside>
         </>
     );
@@ -302,15 +222,8 @@ function Header({ userData, handleLogout, setIsSidebarOpen }) {
         <header className="bg-gray-900/80 backdrop-blur-sm border-b border-gray-700 p-4 flex justify-between items-center z-20 sticky top-0">
              <button onClick={() => setIsSidebarOpen(true)} className="text-gray-400 focus:outline-none"><Menu className="h-6 w-6" /></button>
             <div className="flex items-center space-x-4">
-                <div className="text-right">
-                    <p className="font-semibold text-white">{userData?.displayName || userData?.username}</p>
-                    <p className="text-sm text-purple-400 capitalize font-medium">{userData?.role}</p>
-                </div>
-                 <img
-                    className="h-11 w-11 rounded-full object-cover border-2 border-purple-500"
-                    src={userData?.photoURL || `https://placehold.co/44x44/1F2937/A78BFA?text=${(userData?.displayName || 'U').charAt(0).toUpperCase()}`}
-                    alt="โปรไฟล์"
-                />
+                <div className="text-right"><p className="font-semibold text-white">{userData?.displayName || userData?.username}</p><p className="text-sm text-purple-400 capitalize font-medium">{userData?.role}</p></div>
+                 <img className="h-11 w-11 rounded-full object-cover border-2 border-purple-500" src={userData?.photoURL || `https://placehold.co/44x44/1F2937/A78BFA?text=${(userData?.displayName || 'U').charAt(0).toUpperCase()}`} alt="โปรไฟล์"/>
                 <button onClick={handleLogout} className="text-gray-400 hover:text-red-500 transition-colors" title="ออกจากระบบ"><LogOut className="w-6 h-6" /></button>
             </div>
         </header>
@@ -323,6 +236,7 @@ function PageContent({ page, user, userData, showNotification, navigateTo, onPro
         case 'finance': return <FinancePage user={user} userData={userData}/>;
         case 'calendar': return <CalendarPage user={user} showNotification={showNotification}/>;
         case 'reports': return <ReportsPage user={user} userData={userData} />;
+        case 'all-finances': return <AllFinancesPage user={user} userData={userData} />;
         case 'settings': return <SettingsPage user={user} userData={userData} showNotification={showNotification} />;
         case 'profile': return <ProfilePage user={user} userData={userData} showNotification={showNotification} onProfileUpdate={onProfileUpdate} />;
         case 'logs': return <LogsPage />;
@@ -340,35 +254,27 @@ function HomePage({navigateTo}) {
     useEffect(() => {
         const finPath = `/artifacts/${appId}/public/data/finances`;
         const eventsPath = `/artifacts/${appId}/public/data/events`;
-        
         const unsubFin = onSnapshot(collection(db, finPath), (snapshot) => {
             let totalIncome = 0, totalExpense = 0;
             snapshot.forEach(doc => {
                 const data = doc.data();
-                if(data.type === 'income') totalIncome += data.amount;
-                else totalExpense += data.amount;
+                if(data.type === 'income') totalIncome += data.amount; else totalExpense += data.amount;
             });
             setSummary(prev => ({ ...prev, income: totalIncome, expense: totalExpense, balance: totalIncome - totalExpense }));
         });
-
         const qTx = query(collection(db, finPath), orderBy('createdAt', 'desc'), limit(3));
         const unsubLatestTx = onSnapshot(qTx, (snapshot) => setLatestTx(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}))));
-        
         const now = new Date();
         const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const qEvents = query(collection(db, eventsPath), where('date', '>=', Timestamp.fromDate(startOfToday)), orderBy('date'));
         const unsubEvents = onSnapshot(qEvents, (snapshot) => setUpcomingEvents(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}))));
-        
         return () => { unsubFin(); unsubEvents(); unsubLatestTx(); };
     }, []);
 
     const SummaryCard = ({ title, value, icon, color, page }) => (
         <div onClick={() => navigateTo(page)} className={`bg-gray-800 p-6 rounded-2xl border border-gray-700 shadow-lg hover:border-${color}-500 hover:shadow-${color}-500/20 transition-all duration-300 cursor-pointer group`}>
             <div className="flex items-center justify-between">
-                <div>
-                    <p className="text-sm text-gray-400 font-medium">{title}</p>
-                    <p className="text-3xl font-bold text-white mt-1">{value}</p>
-                </div>
+                <div><p className="text-sm text-gray-400 font-medium">{title}</p><p className="text-3xl font-bold text-white mt-1">{value}</p></div>
                 <div className={`p-3 rounded-full bg-${color}-600/20 text-${color}-400 group-hover:bg-${color}-500 group-hover:text-white transition-colors`}>{icon}</div>
             </div>
         </div>
@@ -383,22 +289,13 @@ function HomePage({navigateTo}) {
                 <SummaryCard title="คงเหลือทั้งหมด" value={formatCurrency(summary.balance)} icon={<DollarSign/>} color="purple" page="reports" />
                 <SummaryCard title="กิจกรรมในอนาคต" value={`${upcomingEvents.length} รายการ`} icon={<Calendar/>} color="blue" page="calendar" />
             </div>
-
             <div className="bg-gray-800 p-6 rounded-2xl border border-gray-700">
                 <h3 className="text-xl font-bold text-white mb-4">รายการล่าสุด</h3>
                 <div className="space-y-4">
                     {latestTx.length > 0 ? latestTx.map(t => (
                         <div key={t.id} className="flex items-center justify-between bg-gray-700/50 p-4 rounded-lg">
-                            <div className="flex items-center">
-                                <div className={`w-3 h-3 rounded-full mr-4 ${t.type === 'income' ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                                <div>
-                                    <p className="font-semibold text-white">{t.description || "ไม่มีรายละเอียด"}</p>
-                                    <p className="text-sm text-gray-400">{t.category} • {formatFullDate(t.createdAt)}</p>
-                                </div>
-                            </div>
-                            <p className={`font-bold text-lg ${t.type === 'income' ? 'text-green-400' : 'text-red-400'}`}>
-                                {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
-                            </p>
+                            <div className="flex items-center"><div className={`w-3 h-3 rounded-full mr-4 ${t.type === 'income' ? 'bg-green-500' : 'bg-red-500'}`}></div><div><p className="font-semibold text-white">{t.description || "ไม่มีรายละเอียด"}</p><p className="text-sm text-gray-400">{t.category} • {formatFullDate(t.createdAt)}</p></div></div>
+                            <p className={`font-bold text-lg ${t.type === 'income' ? 'text-green-400' : 'text-red-400'}`}>{t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}</p>
                         </div>
                     )) : (<p className="text-gray-500 text-center py-8">ยังไม่มีรายการ...</p>)}
                 </div>
@@ -406,7 +303,6 @@ function HomePage({navigateTo}) {
         </div>
     );
 }
-
 
 function FinancePage({ user, userData }) {
     const [transactions, setTransactions] = useState([]);
@@ -430,20 +326,9 @@ function FinancePage({ user, userData }) {
             <h2 className="text-3xl font-bold text-white mb-6">รายรับ-รายจ่าย</h2>
             <div className="space-y-3 pb-24">
                  {transactions.length > 0 ? transactions.map(t => (
-                    <div key={t.id} className="bg-gray-800 border border-gray-700 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition hover:border-purple-500">
-                         <div className="flex items-center w-full sm:w-auto">
-                            <div className={`p-3 rounded-full mr-4 ${t.type === 'income' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}><DollarSign size={20}/></div>
-                            <div className="flex-grow">
-                                <p className="font-semibold text-white">{t.description || "ไม่มีรายละเอียด"}</p>
-                                <p className="text-sm text-gray-400">{t.category}</p>
-                                <p className="text-xs text-gray-500 mt-1">บันทึกเมื่อ: {formatFullDate(t.createdAt)}</p>
-                            </div>
-                        </div>
-                         <div className="flex items-center space-x-4 self-end sm:self-center">
-                            {t.fileURL && <a href={t.fileURL} target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:text-purple-300"><FileText/></a>}
-                            <p className={`font-bold text-xl flex-shrink-0 ${t.type === 'income' ? 'text-green-400' : 'text-red-400'}`}>{t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}</p>
-                             {userData.role !== 'staff' && (<button onClick={() => handleDelete(t.id)} className="text-gray-500 hover:text-red-500 p-1"><Trash2 size={18}/></button>)}
-                        </div>
+                    <div key={t.id} className="bg-gray-800 border border-gray-700 p-4 rounded-xl flex items-center justify-between gap-4 transition hover:border-purple-500">
+                        <div className="flex items-center flex-1 min-w-0"><div className={`p-3 rounded-full mr-4 flex-shrink-0 ${t.type === 'income' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}><DollarSign size={20}/></div><div className="flex-1 min-w-0"><p className="font-semibold text-white truncate">{t.description || "ไม่มีรายละเอียด"}</p><p className="text-sm text-gray-400">{t.category}</p><p className="text-xs text-gray-500 mt-1">บันทึกเมื่อ: {formatFullDate(t.createdAt)}</p></div></div>
+                        <div className="flex items-center space-x-2 sm:space-x-4 flex-shrink-0"><p className={`font-bold text-lg sm:text-xl text-right ${t.type === 'income' ? 'text-green-400' : 'text-red-400'}`}>{t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}</p><div className="flex items-center">{t.fileURL && <a href={t.fileURL} target="_blank" rel="noopener noreferrer" className="p-1 text-purple-400 hover:text-purple-300"><FileText/></a>}{userData.role !== 'staff' && (<button onClick={() => handleDelete(t.id)} className="text-gray-500 hover:text-red-500 p-1"><Trash2 size={18}/></button>)}</div></div>
                     </div>
                  )) : (<div className="text-center py-20"><p className="text-gray-500">ยังไม่มีรายการ...</p><p className="text-gray-600">กดปุ่ม + เพื่อเพิ่มรายการแรกของคุณ</p></div>)}
             </div>
@@ -466,7 +351,6 @@ function FinanceModal({ isOpen, onClose, user }) {
     useEffect(() => {
         if (!isOpen) return;
         setType('expense'); setAmount(''); setDescription(''); setFile(null); setError('');
-
         const categoriesCollectionPath = `/artifacts/${appId}/public/data/categories`;
         const q = query(collection(db, categoriesCollectionPath));
         const unsub = onSnapshot(q, (snapshot) => {
@@ -507,7 +391,7 @@ function FinanceModal({ isOpen, onClose, user }) {
         try {
             const financeCollectionPath = `/artifacts/${appId}/public/data/finances`;
             const docRef = await addDoc(collection(db, financeCollectionPath), transactionData);
-            await logAction(user, 'create_transaction', { transactionId: docRef.id, ...transactionData });
+            await logAction(user, 'create_transaction', { ...transactionData, transactionId: docRef.id });
             onClose();
         } catch (err) { setError('บันทึกข้อมูลล้มเหลว'); } 
         finally { setUploading(false); }
@@ -744,86 +628,152 @@ function ReportsPage({ user, userData }) {
         const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
         return { start, end };
     });
+    const [isCustomRange, setIsCustomRange] = useState(false);
+    const [currentMonth, setCurrentMonth] = useState(new Date());
 
     useEffect(() => {
-        const financeCollectionPath = `/artifacts/${appId}/public/data/finances`;
-        const q = query(collection(db, financeCollectionPath));
+        const finPath = `/artifacts/${appId}/public/data/finances`;
+        const q = query(collection(db, finPath));
         const unsub = onSnapshot(q, (snapshot) => setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
         return unsub;
     }, []);
 
     const filteredData = useMemo(() => {
-        const start = new Date(dateRange.start); start.setHours(0, 0, 0, 0);
-        const end = new Date(dateRange.end); end.setHours(23, 59, 59, 999);
+        const start = isCustomRange ? new Date(dateRange.start) : new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+        start.setHours(0, 0, 0, 0);
+        const end = isCustomRange ? new Date(dateRange.end) : new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
+        end.setHours(23, 59, 59, 999);
         return transactions.filter(t => { const tDate = t.createdAt.toDate(); return tDate >= start && tDate <= end; });
-    }, [dateRange, transactions]);
-
-    const summary = useMemo(() => filteredData.reduce((acc, t) => {
-        if (t.type === 'income') acc.income += t.amount; else acc.expense += t.amount; return acc;
-    }, { income: 0, expense: 0 }), [filteredData]);
+    }, [transactions, currentMonth, isCustomRange, dateRange]);
     
-    const handleDateChange = (e) => setDateRange({ ...dateRange, [e.target.name]: e.target.value });
-
-    const exportToCSV = () => {
-        let csvContent = "\uFEFF" + "data:text/csv;charset=utf-8,";
-        csvContent += "วันที่บันทึก,ประเภท,หมวดหมู่,รายละเอียด,จำนวนเงิน,ไฟล์แนบ\n";
-        filteredData.forEach(row => {
-            const line = `"${formatFullDate(row.createdAt)}","${row.type === 'income' ? 'รายรับ' : 'รายจ่าย'}","${row.category}","${(row.description || '').replace(/"/g, '""')}",${row.amount},"${row.fileURL}"\n`;
-            csvContent += line;
+    const dailySummary = useMemo(() => {
+        const summary = {};
+        filteredData.forEach(t => {
+            const day = t.createdAt.toDate().getDate();
+            if (!summary[day]) summary[day] = { income: 0, expense: 0 };
+            if (t.type === 'income') summary[day].income += t.amount;
+            else summary[day].expense += t.amount;
         });
-        const link = document.createElement("a");
-        link.setAttribute("href", encodeURI(csvContent));
-        link.setAttribute("download", `report_${dateRange.start}_to_${dateRange.end}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        logAction(user, 'export_report_csv', { dateRange });
-    };
+        const daysInMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate();
+        const chartData = [];
+        for (let i = 1; i <= daysInMonth; i++) {
+            chartData.push({ name: i, รายรับ: summary[i]?.income || 0, รายจ่าย: summary[i]?.expense || 0, });
+        }
+        return chartData;
+    }, [filteredData, currentMonth]);
 
-    const chartData = [ { name: 'รายรับ', value: summary.income, color: '#34d399' }, { name: 'รายจ่าย', value: summary.expense, color: '#f87171' } ];
+    const changeMonth = (offset) => {
+        setIsCustomRange(false);
+        setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + offset, 1));
+    }
 
     return (
         <div className="space-y-8">
-            <h2 className="text-3xl font-bold text-white">รายงาน</h2>
-            <div className="bg-gray-800 p-6 rounded-2xl border border-gray-700">
-                <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-                    <div className="flex gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-400 mb-1">วันที่เริ่มต้น</label>
-                            <input type="date" name="start" value={dateRange.start} onChange={handleDateChange} className="p-2 bg-gray-700 border border-gray-600 rounded-md"/>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-400 mb-1">วันที่สิ้นสุด</label>
-                            <input type="date" name="end" value={dateRange.end} onChange={handleDateChange} className="p-2 bg-gray-700 border border-gray-600 rounded-md"/>
-                        </div>
-                    </div>
-                    {userData.role === 'owner' && ( <button onClick={exportToCSV} className="bg-green-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-green-700 w-full md:w-auto">Export to CSV</button>)}
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                <h2 className="text-3xl font-bold text-white leading-tight">รายงานการเงิน</h2>
+                 <div className="flex items-center space-x-2">
+                    <button onClick={() => changeMonth(-1)} className="p-2 rounded-md bg-gray-700 hover:bg-gray-600"><ChevronLeft/></button>
+                    <span className="text-xl font-semibold text-purple-400 w-48 text-center">{isCustomRange ? "กำหนดเอง" : currentMonth.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })}</span>
+                    <button onClick={() => changeMonth(1)} className="p-2 rounded-md bg-gray-700 hover:bg-gray-600"><ChevronRight/></button>
                 </div>
             </div>
-
+            
             <div className="bg-gray-800 p-6 rounded-2xl border border-gray-700">
-                 <h3 className="text-xl font-bold text-white mb-4">สรุปและกราฟ</h3>
-                 <div className="w-full h-80">
+                <h3 className="text-xl font-bold text-white mb-4">กราฟสรุปประจำวัน</h3>
+                <div className="w-full h-80">
                     <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={chartData} margin={{ top: 5, right: 20, left: 20, bottom: 5 }} layout="vertical">
+                        <BarChart data={dailySummary} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                            <XAxis type="number" tickFormatter={(value) => formatCurrency(value)} tick={{ fill: '#9ca3af' }} />
-                            <YAxis type="category" dataKey="name" tick={{ fill: '#9ca3af' }} width={80} />
-                            <Tooltip contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #4B5563', borderRadius: '0.5rem' }} labelStyle={{ color: '#A78BFA' }} formatter={(value) => formatCurrency(value)}/>
-                            <Bar dataKey="value" barSize={40} radius={[0, 8, 8, 0]}>
-                                {chartData.map((entry, index) => (<Cell key={`cell-${index}`} fill={entry.color} />))}
-                            </Bar>
+                            <XAxis dataKey="name" tick={{ fill: '#9ca3af' }} />
+                            <YAxis tickFormatter={(value) => `${value/1000}k`} tick={{ fill: '#9ca3af' }}/>
+                            <Tooltip contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #4B5563' }} formatter={(value) => formatCurrency(value)} />
+                            <Legend wrapperStyle={{ color: '#e5e7eb' }}/>
+                            <Bar dataKey="รายรับ" fill="#34d399" radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="รายจ่าย" fill="#f87171" radius={[4, 4, 0, 0]} />
                         </BarChart>
                     </ResponsiveContainer>
-                 </div>
-                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6 text-center">
-                     <div className="bg-green-500/10 p-4 rounded-lg"><p className="text-green-400 font-semibold">รายรับรวม: {formatCurrency(summary.income)}</p></div>
-                     <div className="bg-red-500/10 p-4 rounded-lg"><p className="text-red-400 font-semibold">รายจ่ายรวม: {formatCurrency(summary.expense)}</p></div>
-                     <div className="bg-purple-500/10 p-4 rounded-lg"><p className="text-purple-400 font-semibold">คงเหลือ: {formatCurrency(summary.income - summary.expense)}</p></div>
-                 </div>
+                </div>
             </div>
         </div>
     );
+}
+
+// **NEW** All Finances Page
+function AllFinancesPage({ user, userData }) {
+    const [transactions, setTransactions] = useState([]);
+    const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+    const [years, setYears] = useState([]);
+
+    useEffect(() => {
+        const financeCollectionPath = `/artifacts/${appId}/public/data/finances`;
+        const q = query(collection(db, financeCollectionPath), orderBy('createdAt', 'desc'));
+        const unsub = onSnapshot(q, (snapshot) => {
+            const allTx = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+            setTransactions(allTx);
+            const uniqueYears = [...new Set(allTx.map(tx => tx.createdAt.toDate().getFullYear()))];
+            setYears(uniqueYears);
+        });
+        return unsub;
+    }, []);
+
+    const monthlySummary = useMemo(() => {
+        const yearData = transactions.filter(tx => tx.createdAt.toDate().getFullYear() === selectedYear);
+        const summary = Array.from({length: 12}, (_, i) => ({month: i, income: 0, expense: 0}));
+        yearData.forEach(tx => {
+            const month = tx.createdAt.toDate().getMonth();
+            if (tx.type === 'income') summary[month].income += tx.amount;
+            else summary[month].expense += tx.amount;
+        });
+        return summary.map((m, i) => ({...m, name: new Date(selectedYear, i).toLocaleDateString('th-TH', {month: 'short'})}));
+    }, [transactions, selectedYear]);
+    
+    const handleExport = () => {
+        const dataToExport = transactions.filter(tx => tx.createdAt.toDate().getFullYear() === selectedYear)
+        .map(tx => ({
+            'วันที่': formatFullDate(tx.createdAt),
+            'ประเภท': tx.type === 'income' ? 'รายรับ' : 'รายจ่าย',
+            'หมวดหมู่': tx.category,
+            'รายละเอียด': tx.description,
+            'จำนวนเงิน': tx.amount,
+            'ไฟล์': tx.fileURL,
+        }));
+        exportToExcel(dataToExport, `financial_summary_${selectedYear}`);
+        logAction(user, 'export_yearly_excel', { year: selectedYear });
+    }
+
+    if (userData.role !== 'owner') return <div>คุณไม่มีสิทธิ์เข้าถึงหน้านี้</div>
+
+    return (
+        <div className="space-y-8">
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                <h2 className="text-3xl font-bold text-white">การเงินทั้งหมด</h2>
+                <div className="flex items-center gap-4">
+                     <select value={selectedYear} onChange={e => setSelectedYear(parseInt(e.target.value))} className="p-2 bg-gray-700 border border-gray-600 rounded-md">
+                        {years.map(y => <option key={y} value={y}>ปี {y+543}</option>)}
+                    </select>
+                    <button onClick={handleExport} className="flex items-center bg-green-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-green-700">
+                        <Download className="mr-2" size={18}/> Export to Excel
+                    </button>
+                </div>
+            </div>
+            <div className="bg-gray-800 p-6 rounded-2xl border border-gray-700">
+                <h3 className="text-xl font-bold text-white mb-4">สรุปรายเดือนของปี {selectedYear+543}</h3>
+                 <div className="w-full h-96">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={monthlySummary} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                            <XAxis dataKey="name" tick={{ fill: '#9ca3af' }} />
+                            <YAxis tickFormatter={(value) => `${value/1000}k`} tick={{ fill: '#9ca3af' }}/>
+                            <Tooltip contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #4B5563' }} formatter={(value) => formatCurrency(value)} />
+                            <Legend wrapperStyle={{ color: '#e5e7eb' }}/>
+                            <Bar dataKey="income" name="รายรับ" fill="#34d399" radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="expense" name="รายจ่าย" fill="#f87171" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                    </ResponsiveContainer>
+                 </div>
+            </div>
+        </div>
+    )
 }
 
 function SettingsPage({ user, userData, showNotification }) {
@@ -1027,21 +977,22 @@ function ProfilePage({ user, userData, showNotification, onProfileUpdate }) {
     );
 }
 
+// **REVISED Logs Page**
 function LogDetailView({ detailsString }) {
     try {
         const details = JSON.parse(detailsString);
         let output = [];
-        if(details.username) output.push(`ชื่อผู้ใช้: ${details.username}`);
-        if(details.newUserId) output.push(`ID ผู้ใช้ใหม่: ${details.newUserId}`);
-        if(details.targetUserId) output.push(`ID เป้าหมาย: ${details.targetUserId}`);
-        if(details.newRole) output.push(`สิทธิ์ใหม่: ${details.newRole}`);
-        if(details.transactionId) output.push(`ID รายการ: ${details.transactionId}`);
-        if(details.amount) output.push(`จำนวน: ${formatCurrency(details.amount)}`);
+        if(details.description) output.push(details.description)
         if(details.category) output.push(`หมวดหมู่: ${details.category}`);
-        if(details.eventId) output.push(`ID กิจกรรม: ${details.eventId}`);
-        if(details.title) output.push(`หัวข้อ: ${details.title}`);
-        
-        return output.length > 0 ? output.join(' / ') : "ไม่มีรายละเอียดเพิ่มเติม";
+        if(details.amount) output.push(`(${formatCurrency(details.amount)})`);
+
+        if(details.username) output.push(`ชื่อผู้ใช้: ${details.username}`);
+        if(details.newRole) output.push(`-> ${details.newRole}`);
+        if(details.title) output.push(details.title)
+
+        if(output.length > 0) return output.join(' ');
+
+        return "ไม่มีรายละเอียดเพิ่มเติม";
     } catch (e) {
         return detailsString.replace(/"/g, '');
     }
@@ -1069,12 +1020,12 @@ function LogsPage() {
 
     const formatAction = (action) => {
         const actions = {
-            login_success: 'เข้าสู่ระบบสำเร็จ', logout: 'ออกจากระบบ', login_failed: 'เข้าระบบล้มเหลว',
+            login_success: 'เข้าสู่ระบบ', logout: 'ออกจากระบบ', login_failed: 'เข้าระบบล้มเหลว',
             create_transaction: 'สร้างรายการเงิน', delete_transaction: 'ลบรายการเงิน',
             create_category: 'สร้างหมวดหมู่', delete_category: 'ลบหมวดหมู่',
             create_event: 'สร้างกิจกรรม', delete_event: 'ลบกิจกรรม',
             update_profile: 'อัปเดตโปรไฟล์', change_password: 'เปลี่ยนรหัสผ่าน',
-            export_report_csv: 'ส่งออก CSV', 
+            export_report_csv: 'ส่งออก CSV', export_yearly_excel: 'ส่งออก Excel',
             create_user: 'สร้างผู้ใช้ใหม่', delete_user: 'ลบผู้ใช้', update_user: 'อัปเดตผู้ใช้'
         };
         const actionStyle = {
