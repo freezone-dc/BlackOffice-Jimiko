@@ -23,7 +23,7 @@ import {
     getDownloadURL 
 } from 'firebase/storage';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
-import * as XLSX from 'xlsx'; // New library for Excel export
+// import * as XLSX from 'xlsx'; // This line is removed to fix the build error. The library is loaded dynamically.
 import { 
     Home, DollarSign, Calendar, BarChart2 as ReportIcon, Settings, User, LogOut, 
     Plus, Trash2, FileText, X, Menu, Users, History, AlertTriangle, KeyRound, 
@@ -55,7 +55,7 @@ const encodePass = (str) => btoa(str);
 
 // --- Helper Functions ---
 const formatCurrency = (amount) => new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB', maximumFractionDigits: 0 }).format(amount);
-const formatFullDate = (date) => date ? new Date(date.seconds * 1000).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short'}) : 'N/A';
+const formatFullDate = (date) => date ? new Date(date.seconds * 1000).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'medium'}) : 'N/A';
 const formatShortDate = (date) => date ? new Date(date.seconds * 1000).toLocaleDateString('th-TH') : 'N/A';
 
 const logAction = async (user, action, details = {}) => {
@@ -74,10 +74,21 @@ const logAction = async (user, action, details = {}) => {
 };
 
 const exportToExcel = (data, fileName) => {
-    const worksheet = XLSX.utils.json_to_sheet(data);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Sheet1");
-    XLSX.writeFile(workbook, `${fileName}.xlsx`);
+    const generateFile = () => {
+        const worksheet = window.XLSX.utils.json_to_sheet(data);
+        const workbook = window.XLSX.utils.book_new();
+        window.XLSX.utils.book_append_sheet(workbook, worksheet, "Sheet1");
+        window.XLSX.writeFile(workbook, `${fileName}.xlsx`);
+    };
+
+    if (window.XLSX) {
+        generateFile();
+    } else {
+        const script = document.createElement('script');
+        script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+        script.onload = generateFile;
+        document.head.appendChild(script);
+    }
 };
 
 // --- Reusable Components ---
@@ -315,10 +326,16 @@ function FinancePage({ user, userData }) {
         return unsub;
     }, []);
 
-    const handleDelete = async (id) => {
+    const handleDelete = async (transaction) => {
         const financeCollectionPath = `/artifacts/${appId}/public/data/finances`;
-        await deleteDoc(doc(db, financeCollectionPath, id));
-        await logAction(user, 'delete_transaction', { transactionId: id });
+        await logAction(user, 'delete_transaction', { 
+            transactionId: transaction.id, 
+            description: transaction.description,
+            amount: transaction.amount,
+            type: transaction.type,
+            category: transaction.category
+        });
+        await deleteDoc(doc(db, financeCollectionPath, transaction.id));
     };
 
     return (
@@ -328,7 +345,7 @@ function FinancePage({ user, userData }) {
                  {transactions.length > 0 ? transactions.map(t => (
                     <div key={t.id} className="bg-gray-800 border border-gray-700 p-4 rounded-xl flex items-center justify-between gap-4 transition hover:border-purple-500">
                         <div className="flex items-center flex-1 min-w-0"><div className={`p-3 rounded-full mr-4 flex-shrink-0 ${t.type === 'income' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}><DollarSign size={20}/></div><div className="flex-1 min-w-0"><p className="font-semibold text-white truncate">{t.description || "ไม่มีรายละเอียด"}</p><p className="text-sm text-gray-400">{t.category}</p><p className="text-xs text-gray-500 mt-1">บันทึกเมื่อ: {formatFullDate(t.createdAt)}</p></div></div>
-                        <div className="flex items-center space-x-2 sm:space-x-4 flex-shrink-0"><p className={`font-bold text-lg sm:text-xl text-right ${t.type === 'income' ? 'text-green-400' : 'text-red-400'}`}>{t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}</p><div className="flex items-center">{t.fileURL && <a href={t.fileURL} target="_blank" rel="noopener noreferrer" className="p-1 text-purple-400 hover:text-purple-300"><FileText/></a>}{userData.role !== 'staff' && (<button onClick={() => handleDelete(t.id)} className="text-gray-500 hover:text-red-500 p-1"><Trash2 size={18}/></button>)}</div></div>
+                        <div className="flex items-center space-x-2 sm:space-x-4 flex-shrink-0"><p className={`font-bold text-lg sm:text-xl text-right ${t.type === 'income' ? 'text-green-400' : 'text-red-400'}`}>{t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}</p><div className="flex items-center">{t.fileURL && <a href={t.fileURL} target="_blank" rel="noopener noreferrer" className="p-1 text-purple-400 hover:text-purple-300"><FileText/></a>}{userData.role !== 'staff' && (<button onClick={() => handleDelete(t)} className="text-gray-500 hover:text-red-500 p-1"><Trash2 size={18}/></button>)}</div></div>
                     </div>
                  )) : (<div className="text-center py-20"><p className="text-gray-500">ยังไม่มีรายการ...</p><p className="text-gray-600">กดปุ่ม + เพื่อเพิ่มรายการแรกของคุณ</p></div>)}
             </div>
