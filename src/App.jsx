@@ -5,7 +5,6 @@ import {
     collection, 
     addDoc, 
     doc, 
-    getDoc, // FIXED: Added getDoc to imports
     getDocs,
     setDoc, 
     updateDoc, 
@@ -23,13 +22,13 @@ import {
     uploadBytesResumable, 
     getDownloadURL 
 } from 'firebase/storage';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
 // import * as XLSX from 'xlsx'; // This line is removed to fix the build error. The library is loaded dynamically.
 import { 
     Home, DollarSign, Calendar, BarChart2 as ReportIcon, Settings, User, LogOut, 
     Plus, Trash2, FileText, X, Menu, Users, History, AlertTriangle, KeyRound, 
     UserPlus, ChevronLeft, ChevronRight, UploadCloud, CheckCircle, Eye, EyeOff, 
-    Edit, Image as ImageIcon, Search, Download, FileSpreadsheet, ShieldCheck
+    Edit, Image as ImageIcon, Search, Download, FileSpreadsheet
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -57,7 +56,6 @@ const encodePass = (str) => btoa(str);
 // --- Helper Functions ---
 const formatCurrency = (amount) => new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB', maximumFractionDigits: 0 }).format(amount);
 const formatFullDate = (date) => date ? new Date(date.seconds * 1000).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'medium'}) : 'N/A';
-const formatShortDate = (date) => date ? new Date(date.seconds * 1000).toLocaleDateString('th-TH') : 'N/A';
 
 const logAction = async (user, action, details = {}) => {
     try {
@@ -119,41 +117,19 @@ export default function App() {
     useEffect(() => {
         const storedUser = sessionStorage.getItem('blackoffice_user');
         if (storedUser) {
-            const userData = JSON.parse(storedUser);
-            // Fetch permissions if not already in session
-            if (!userData.permissions) {
-                fetchPermissions(userData.role).then(permissions => {
-                    const fullUserData = { ...userData, permissions };
-                    setCurrentUser(fullUserData);
-                    sessionStorage.setItem('blackoffice_user', JSON.stringify(fullUserData));
-                    setIsLoading(false);
-                });
-            } else {
-                setCurrentUser(userData);
-                setIsLoading(false);
-            }
-        } else {
-            setIsLoading(false);
+            setCurrentUser(JSON.parse(storedUser));
         }
+        setIsLoading(false);
     }, []);
     
-    const fetchPermissions = async (role) => {
-        if (!role) return {};
-        const docRef = doc(db, 'permissions', role);
-        const docSnap = await getDoc(docRef);
-        return docSnap.exists() ? docSnap.data() : {};
-    };
-
     const showNotification = (message, type = 'success') => {
         setNotification({ show: true, message, type });
         setTimeout(() => setNotification({ show: false, message: '', type: 'success' }), 4000);
     };
 
-    const handleLoginSuccess = async (userData) => {
-        const permissions = await fetchPermissions(userData.role);
-        const fullUserData = { ...userData, permissions };
-        setCurrentUser(fullUserData);
-        sessionStorage.setItem('blackoffice_user', JSON.stringify(fullUserData));
+    const handleLoginSuccess = (userData) => {
+        setCurrentUser(userData);
+        sessionStorage.setItem('blackoffice_user', JSON.stringify(userData));
     };
     
     const handleProfileUpdate = (updatedData) => {
@@ -180,7 +156,7 @@ export default function App() {
     return (
         <div className="flex h-screen bg-gray-900 text-gray-200 font-sans">
             {notification.show && (<div className={`fixed top-5 right-5 text-white py-2 px-4 rounded-lg shadow-2xl z-[100] ${notification.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{notification.message}</div>)}
-            <Sidebar currentPage={currentPage} navigateTo={navigateTo} userData={currentUser} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen}/>
+            <Sidebar currentPage={currentPage} navigateTo={navigateTo} userRole={currentUser?.role} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen}/>
             <div className="flex-1 flex flex-col overflow-hidden">
                 <Header userData={currentUser} handleLogout={handleLogout} setIsSidebarOpen={setIsSidebarOpen}/>
                 <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-900 p-4 sm:p-6 lg:p-8">
@@ -208,7 +184,7 @@ function AuthPage({ onLoginSuccess }) {
             const userDoc = querySnapshot.docs[0];
             const userData = { id: userDoc.id, ...userDoc.data() };
             if (userData.password === encodePass(password)) {
-                await onLoginSuccess(userData);
+                onLoginSuccess(userData);
                 await logAction(userData, 'login_success', { role: userData.role });
             } else { throw new Error("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง"); }
         } catch (err) { setError(err.message); await logAction(null, 'login_failed', { username }); } 
@@ -231,33 +207,23 @@ function AuthPage({ onLoginSuccess }) {
 }
 
 // --- Layout Components ---
-function Sidebar({ currentPage, navigateTo, userData, isSidebarOpen, setIsSidebarOpen }) {
-    const userRole = userData?.role;
-    const permissions = userData?.permissions || {};
-    
+function Sidebar({ currentPage, navigateTo, userRole, isSidebarOpen, setIsSidebarOpen }) {
     const navItems = [
-        { id: 'home', label: 'หน้าแรก', icon: Home, permissionKey: 'home' },
-        { id: 'finance', label: 'รายรับ-รายจ่าย', icon: DollarSign, permissionKey: 'finance' },
-        { id: 'calendar', label: 'ปฏิทินงาน', icon: Calendar, permissionKey: 'calendar' },
-        { id: 'reports', label: 'รายงานการเงิน', icon: ReportIcon, permissionKey: 'reports' },
-        { id: 'all-finances', label: 'การเงินทั้งหมด', icon: FileSpreadsheet, permissionKey: 'allFinances' },
-        { id: 'settings', label: 'ตั้งค่า', icon: Settings, permissionKey: 'settings' },
-        { id: 'profile', label: 'โปรไฟล์', icon: User, permissionKey: 'profile' },
-        { id: 'logs', label: 'Log', icon: History, permissionKey: 'logs' },
+        { id: 'home', label: 'หน้าแรก', icon: Home, roles: ['staff', 'admin', 'owner'] },
+        { id: 'finance', label: 'รายรับ-รายจ่าย', icon: DollarSign, roles: ['staff', 'admin', 'owner'] },
+        { id: 'calendar', label: 'ปฏิทินงาน', icon: Calendar, roles: ['staff', 'admin', 'owner'] },
+        { id: 'reports', label: 'รายงานการเงิน', icon: ReportIcon, roles: ['admin', 'owner'] },
+        { id: 'all-finances', label: 'การเงินทั้งหมด', icon: FileSpreadsheet, roles: ['owner'] },
+        { id: 'settings', label: 'ตั้งค่า', icon: Settings, roles: ['admin', 'owner'] },
+        { id: 'profile', label: 'โปรไฟล์', icon: User, roles: ['staff', 'admin', 'owner'] },
+        { id: 'logs', label: 'Log', icon: History, roles: ['owner'] },
     ];
-    
-    const visibleNavItems = useMemo(() => {
-        if (!userRole) return [];
-        if (userRole === 'owner') return navItems; // Owner sees all
-        return navItems.filter(item => permissions[item.permissionKey]);
-    }, [userRole, permissions]);
-
     return (
         <>
             <div className={`fixed inset-0 bg-black bg-opacity-50 z-30 md:hidden ${isSidebarOpen ? 'block' : 'hidden'}`} onClick={() => setIsSidebarOpen(false)}></div>
             <aside className={`bg-gray-800 border-r border-gray-700 text-gray-300 w-64 space-y-2 py-4 px-2 fixed inset-y-0 left-0 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 transition-transform duration-300 ease-in-out z-40`}>
                 <div className="px-4 pb-4 border-b border-gray-700 flex items-center justify-between"><h1 className="text-xl font-bold text-white">Black<span className="text-purple-400">Office</span></h1><button onClick={() => setIsSidebarOpen(false)} className="text-gray-400 hover:text-white md:hidden"><X className="w-6 h-6" /></button></div>
-                <nav className="flex-grow pt-4">{visibleNavItems.map(item => (<a key={item.id} href="#" onClick={(e) => { e.preventDefault(); navigateTo(item.id); }} className={`flex items-center py-3 px-4 rounded-lg transition-all duration-200 mb-1 ${currentPage === item.id ? 'bg-purple-600 text-white shadow-lg' : 'hover:bg-gray-700 hover:text-white'}`}><item.icon className="w-5 h-5 mr-3" /><span className="font-semibold">{item.label}</span></a>))}</nav>
+                <nav className="flex-grow pt-4">{userRole && navItems.filter(item => item.roles.includes(userRole)).map(item => (<a key={item.id} href="#" onClick={(e) => { e.preventDefault(); navigateTo(item.id); }} className={`flex items-center py-3 px-4 rounded-lg transition-all duration-200 mb-1 ${currentPage === item.id ? 'bg-purple-600 text-white shadow-lg' : 'hover:bg-gray-700 hover:text-white'}`}><item.icon className="w-5 h-5 mr-3" /><span className="font-semibold">{item.label}</span></a>))}</nav>
             </aside>
         </>
     );
@@ -276,37 +242,24 @@ function Header({ userData, handleLogout, setIsSidebarOpen }) {
     );
 }
 
-function PermissionDeniedPage() {
-    return (
-        <div className="flex flex-col items-center justify-center h-full text-center">
-            <AlertTriangle className="w-16 h-16 text-yellow-500 mb-4"/>
-            <h2 className="text-2xl font-bold text-white">ไม่มีสิทธิ์การเข้าถึง</h2>
-            <p className="text-gray-400 mt-2">กรุณาขออนุญาตบอสก่อน</p>
-        </div>
-    );
-}
-
 function PageContent({ page, user, userData, showNotification, navigateTo, onProfileUpdate }) {
-    const permissions = userData?.permissions || {};
-    
     const pages = {
-        home: { component: <HomePage navigateTo={navigateTo}/>, permission: 'home' },
-        finance: { component: <FinancePage user={user} userData={userData}/>, permission: 'finance' },
-        calendar: { component: <CalendarPage user={user} showNotification={showNotification}/>, permission: 'calendar' },
-        reports: { component: <ReportsPage user={user} userData={userData} />, permission: 'reports' },
-        'all-finances': { component: <AllFinancesPage user={user} userData={userData} />, permission: 'allFinances' },
-        settings: { component: <SettingsPage user={user} userData={userData} showNotification={showNotification} />, permission: 'settings' },
-        profile: { component: <ProfilePage user={user} userData={userData} showNotification={showNotification} onProfileUpdate={onProfileUpdate} />, permission: 'profile' },
-        logs: { component: <LogsPage />, permission: 'logs' },
+        home: { component: <HomePage navigateTo={navigateTo}/>, roles: ['owner', 'admin', 'staff'] },
+        finance: { component: <FinancePage user={user} userData={userData}/>, roles: ['owner', 'admin', 'staff'] },
+        calendar: { component: <CalendarPage user={user} showNotification={showNotification}/>, roles: ['owner', 'admin', 'staff'] },
+        reports: { component: <ReportsPage user={user} userData={userData} />, roles: ['owner', 'admin'] },
+        'all-finances': { component: <AllFinancesPage user={user} userData={userData} />, roles: ['owner'] },
+        settings: { component: <SettingsPage user={user} userData={userData} showNotification={showNotification} />, roles: ['owner', 'admin'] },
+        profile: { component: <ProfilePage user={user} userData={userData} showNotification={showNotification} onProfileUpdate={onProfileUpdate} />, roles: ['owner', 'admin', 'staff'] },
+        logs: { component: <LogsPage />, roles: ['owner'] },
     };
 
     const requestedPage = pages[page];
     
-    if (userData.role === 'owner' || (requestedPage && permissions[requestedPage.permission])) {
+    if (requestedPage && requestedPage.roles.includes(userData.role)) {
         return requestedPage.component;
     }
-
-    // Fallback for unauthorized access or unknown pages
+    
     return <PermissionDeniedPage />;
 }
 
@@ -378,11 +331,18 @@ function FinancePage({ user, userData }) {
         const financeCollectionPath = `/artifacts/${appId}/public/data/finances`;
         let q;
         if (userData.role === 'team') {
-            q = query(collection(db, financeCollectionPath), where("userId", "==", user.id), orderBy('createdAt', 'desc'));
+            q = query(collection(db, financeCollectionPath), where("userId", "==", user.id));
         } else {
             q = query(collection(db, financeCollectionPath), orderBy('createdAt', 'desc'));
         }
-        const unsub = onSnapshot(q, (snapshot) => setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
+        const unsub = onSnapshot(q, (snapshot) => {
+            const transData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            // Manual sort for team role as we can't use two orderBy clauses
+            if(userData.role === 'team') {
+                transData.sort((a, b) => b.createdAt.seconds - a.createdAt.seconds);
+            }
+            setTransactions(transData);
+        });
         return unsub;
     }, [user.id, userData.role]);
 
