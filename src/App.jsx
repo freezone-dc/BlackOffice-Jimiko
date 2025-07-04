@@ -5,6 +5,7 @@ import {
     collection, 
     addDoc, 
     doc, 
+    getDoc, // FIXED: Added getDoc to imports
     getDocs,
     setDoc, 
     updateDoc, 
@@ -28,7 +29,7 @@ import {
     Home, DollarSign, Calendar, BarChart2 as ReportIcon, Settings, User, LogOut, 
     Plus, Trash2, FileText, X, Menu, Users, History, AlertTriangle, KeyRound, 
     UserPlus, ChevronLeft, ChevronRight, UploadCloud, CheckCircle, Eye, EyeOff, 
-    Edit, Image as ImageIcon, Search, Download, FileSpreadsheet
+    Edit, Image as ImageIcon, Search, Download, FileSpreadsheet, ShieldCheck
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -117,18 +118,42 @@ export default function App() {
 
     useEffect(() => {
         const storedUser = sessionStorage.getItem('blackoffice_user');
-        if (storedUser) setCurrentUser(JSON.parse(storedUser));
-        setIsLoading(false);
+        if (storedUser) {
+            const userData = JSON.parse(storedUser);
+            // Fetch permissions if not already in session
+            if (!userData.permissions) {
+                fetchPermissions(userData.role).then(permissions => {
+                    const fullUserData = { ...userData, permissions };
+                    setCurrentUser(fullUserData);
+                    sessionStorage.setItem('blackoffice_user', JSON.stringify(fullUserData));
+                    setIsLoading(false);
+                });
+            } else {
+                setCurrentUser(userData);
+                setIsLoading(false);
+            }
+        } else {
+            setIsLoading(false);
+        }
     }, []);
     
+    const fetchPermissions = async (role) => {
+        if (!role) return {};
+        const docRef = doc(db, 'permissions', role);
+        const docSnap = await getDoc(docRef);
+        return docSnap.exists() ? docSnap.data() : {};
+    };
+
     const showNotification = (message, type = 'success') => {
         setNotification({ show: true, message, type });
         setTimeout(() => setNotification({ show: false, message: '', type: 'success' }), 4000);
     };
 
-    const handleLoginSuccess = (userData) => {
-        setCurrentUser(userData);
-        sessionStorage.setItem('blackoffice_user', JSON.stringify(userData));
+    const handleLoginSuccess = async (userData) => {
+        const permissions = await fetchPermissions(userData.role);
+        const fullUserData = { ...userData, permissions };
+        setCurrentUser(fullUserData);
+        sessionStorage.setItem('blackoffice_user', JSON.stringify(fullUserData));
     };
     
     const handleProfileUpdate = (updatedData) => {
@@ -155,7 +180,7 @@ export default function App() {
     return (
         <div className="flex h-screen bg-gray-900 text-gray-200 font-sans">
             {notification.show && (<div className={`fixed top-5 right-5 text-white py-2 px-4 rounded-lg shadow-2xl z-[100] ${notification.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{notification.message}</div>)}
-            <Sidebar currentPage={currentPage} navigateTo={navigateTo} userRole={currentUser?.role} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen}/>
+            <Sidebar currentPage={currentPage} navigateTo={navigateTo} userData={currentUser} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen}/>
             <div className="flex-1 flex flex-col overflow-hidden">
                 <Header userData={currentUser} handleLogout={handleLogout} setIsSidebarOpen={setIsSidebarOpen}/>
                 <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-900 p-4 sm:p-6 lg:p-8">
@@ -183,8 +208,8 @@ function AuthPage({ onLoginSuccess }) {
             const userDoc = querySnapshot.docs[0];
             const userData = { id: userDoc.id, ...userDoc.data() };
             if (userData.password === encodePass(password)) {
-                onLoginSuccess(userData);
-                await logAction(userData, 'login_success');
+                await onLoginSuccess(userData);
+                await logAction(userData, 'login_success', { role: userData.role });
             } else { throw new Error("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง"); }
         } catch (err) { setError(err.message); await logAction(null, 'login_failed', { username }); } 
         finally { setIsLoading(false); }
@@ -206,23 +231,33 @@ function AuthPage({ onLoginSuccess }) {
 }
 
 // --- Layout Components ---
-function Sidebar({ currentPage, navigateTo, userRole, isSidebarOpen, setIsSidebarOpen }) {
+function Sidebar({ currentPage, navigateTo, userData, isSidebarOpen, setIsSidebarOpen }) {
+    const userRole = userData?.role;
+    const permissions = userData?.permissions || {};
+    
     const navItems = [
-        { id: 'home', label: 'หน้าแรก', icon: Home, roles: ['staff', 'admin', 'owner'] },
-        { id: 'finance', label: 'รายรับ-รายจ่าย', icon: DollarSign, roles: ['staff', 'admin', 'owner'] },
-        { id: 'calendar', label: 'ปฏิทินงาน', icon: Calendar, roles: ['staff', 'admin', 'owner'] },
-        { id: 'reports', label: 'รายงานการเงิน', icon: ReportIcon, roles: ['admin', 'owner'] },
-        { id: 'all-finances', label: 'การเงินทั้งหมด', icon: FileSpreadsheet, roles: ['owner'] },
-        { id: 'settings', label: 'ตั้งค่า', icon: Settings, roles: ['admin', 'owner'] },
-        { id: 'profile', label: 'โปรไฟล์', icon: User, roles: ['staff', 'admin', 'owner'] },
-        { id: 'logs', label: 'Log', icon: History, roles: ['owner'] },
+        { id: 'home', label: 'หน้าแรก', icon: Home, permissionKey: 'home' },
+        { id: 'finance', label: 'รายรับ-รายจ่าย', icon: DollarSign, permissionKey: 'finance' },
+        { id: 'calendar', label: 'ปฏิทินงาน', icon: Calendar, permissionKey: 'calendar' },
+        { id: 'reports', label: 'รายงานการเงิน', icon: ReportIcon, permissionKey: 'reports' },
+        { id: 'all-finances', label: 'การเงินทั้งหมด', icon: FileSpreadsheet, permissionKey: 'allFinances' },
+        { id: 'settings', label: 'ตั้งค่า', icon: Settings, permissionKey: 'settings' },
+        { id: 'profile', label: 'โปรไฟล์', icon: User, permissionKey: 'profile' },
+        { id: 'logs', label: 'Log', icon: History, permissionKey: 'logs' },
     ];
+    
+    const visibleNavItems = useMemo(() => {
+        if (!userRole) return [];
+        if (userRole === 'owner') return navItems; // Owner sees all
+        return navItems.filter(item => permissions[item.permissionKey]);
+    }, [userRole, permissions]);
+
     return (
         <>
             <div className={`fixed inset-0 bg-black bg-opacity-50 z-30 md:hidden ${isSidebarOpen ? 'block' : 'hidden'}`} onClick={() => setIsSidebarOpen(false)}></div>
             <aside className={`bg-gray-800 border-r border-gray-700 text-gray-300 w-64 space-y-2 py-4 px-2 fixed inset-y-0 left-0 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 transition-transform duration-300 ease-in-out z-40`}>
                 <div className="px-4 pb-4 border-b border-gray-700 flex items-center justify-between"><h1 className="text-xl font-bold text-white">Black<span className="text-purple-400">Office</span></h1><button onClick={() => setIsSidebarOpen(false)} className="text-gray-400 hover:text-white md:hidden"><X className="w-6 h-6" /></button></div>
-                <nav className="flex-grow pt-4">{userRole && navItems.filter(item => item.roles.includes(userRole)).map(item => (<a key={item.id} href="#" onClick={(e) => { e.preventDefault(); navigateTo(item.id); }} className={`flex items-center py-3 px-4 rounded-lg transition-all duration-200 mb-1 ${currentPage === item.id ? 'bg-purple-600 text-white shadow-lg' : 'hover:bg-gray-700 hover:text-white'}`}><item.icon className="w-5 h-5 mr-3" /><span className="font-semibold">{item.label}</span></a>))}</nav>
+                <nav className="flex-grow pt-4">{visibleNavItems.map(item => (<a key={item.id} href="#" onClick={(e) => { e.preventDefault(); navigateTo(item.id); }} className={`flex items-center py-3 px-4 rounded-lg transition-all duration-200 mb-1 ${currentPage === item.id ? 'bg-purple-600 text-white shadow-lg' : 'hover:bg-gray-700 hover:text-white'}`}><item.icon className="w-5 h-5 mr-3" /><span className="font-semibold">{item.label}</span></a>))}</nav>
             </aside>
         </>
     );
@@ -241,18 +276,38 @@ function Header({ userData, handleLogout, setIsSidebarOpen }) {
     );
 }
 
+function PermissionDeniedPage() {
+    return (
+        <div className="flex flex-col items-center justify-center h-full text-center">
+            <AlertTriangle className="w-16 h-16 text-yellow-500 mb-4"/>
+            <h2 className="text-2xl font-bold text-white">ไม่มีสิทธิ์การเข้าถึง</h2>
+            <p className="text-gray-400 mt-2">กรุณาขออนุญาตบอสก่อน</p>
+        </div>
+    );
+}
+
 function PageContent({ page, user, userData, showNotification, navigateTo, onProfileUpdate }) {
-    switch (page) {
-        case 'home': return <HomePage navigateTo={navigateTo}/>;
-        case 'finance': return <FinancePage user={user} userData={userData}/>;
-        case 'calendar': return <CalendarPage user={user} showNotification={showNotification}/>;
-        case 'reports': return <ReportsPage user={user} userData={userData} />;
-        case 'all-finances': return <AllFinancesPage user={user} userData={userData} />;
-        case 'settings': return <SettingsPage user={user} userData={userData} showNotification={showNotification} />;
-        case 'profile': return <ProfilePage user={user} userData={userData} showNotification={showNotification} onProfileUpdate={onProfileUpdate} />;
-        case 'logs': return <LogsPage />;
-        default: return <div className="text-center text-gray-500">Page not found</div>;
+    const permissions = userData?.permissions || {};
+    
+    const pages = {
+        home: { component: <HomePage navigateTo={navigateTo}/>, permission: 'home' },
+        finance: { component: <FinancePage user={user} userData={userData}/>, permission: 'finance' },
+        calendar: { component: <CalendarPage user={user} showNotification={showNotification}/>, permission: 'calendar' },
+        reports: { component: <ReportsPage user={user} userData={userData} />, permission: 'reports' },
+        'all-finances': { component: <AllFinancesPage user={user} userData={userData} />, permission: 'allFinances' },
+        settings: { component: <SettingsPage user={user} userData={userData} showNotification={showNotification} />, permission: 'settings' },
+        profile: { component: <ProfilePage user={user} userData={userData} showNotification={showNotification} onProfileUpdate={onProfileUpdate} />, permission: 'profile' },
+        logs: { component: <LogsPage />, permission: 'logs' },
+    };
+
+    const requestedPage = pages[page];
+    
+    if (userData.role === 'owner' || (requestedPage && permissions[requestedPage.permission])) {
+        return requestedPage.component;
     }
+
+    // Fallback for unauthorized access or unknown pages
+    return <PermissionDeniedPage />;
 }
 
 // --- Page Components ---
@@ -321,10 +376,15 @@ function FinancePage({ user, userData }) {
     
     useEffect(() => {
         const financeCollectionPath = `/artifacts/${appId}/public/data/finances`;
-        const q = query(collection(db, financeCollectionPath), orderBy('createdAt', 'desc'));
+        let q;
+        if (userData.role === 'team') {
+            q = query(collection(db, financeCollectionPath), where("userId", "==", user.id), orderBy('createdAt', 'desc'));
+        } else {
+            q = query(collection(db, financeCollectionPath), orderBy('createdAt', 'desc'));
+        }
         const unsub = onSnapshot(q, (snapshot) => setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
         return unsub;
-    }, []);
+    }, [user.id, userData.role]);
 
     const handleDelete = async (transaction) => {
         const financeCollectionPath = `/artifacts/${appId}/public/data/finances`;
@@ -345,7 +405,7 @@ function FinancePage({ user, userData }) {
                  {transactions.length > 0 ? transactions.map(t => (
                     <div key={t.id} className="bg-gray-800 border border-gray-700 p-4 rounded-xl flex items-center justify-between gap-4 transition hover:border-purple-500">
                         <div className="flex items-center flex-1 min-w-0"><div className={`p-3 rounded-full mr-4 flex-shrink-0 ${t.type === 'income' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}><DollarSign size={20}/></div><div className="flex-1 min-w-0"><p className="font-semibold text-white truncate">{t.description || "ไม่มีรายละเอียด"}</p><p className="text-sm text-gray-400">{t.category}</p><p className="text-xs text-gray-500 mt-1">บันทึกเมื่อ: {formatFullDate(t.createdAt)}</p></div></div>
-                        <div className="flex items-center space-x-2 sm:space-x-4 flex-shrink-0"><p className={`font-bold text-lg sm:text-xl text-right ${t.type === 'income' ? 'text-green-400' : 'text-red-400'}`}>{t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}</p><div className="flex items-center">{t.fileURL && <a href={t.fileURL} target="_blank" rel="noopener noreferrer" className="p-1 text-purple-400 hover:text-purple-300"><FileText/></a>}{userData.role !== 'staff' && (<button onClick={() => handleDelete(t)} className="text-gray-500 hover:text-red-500 p-1"><Trash2 size={18}/></button>)}</div></div>
+                        <div className="flex items-center space-x-2 sm:space-x-4 flex-shrink-0"><p className={`font-bold text-lg sm:text-xl text-right ${t.type === 'income' ? 'text-green-400' : 'text-red-400'}`}>{t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}</p><div className="flex items-center">{t.fileURL && <a href={t.fileURL} target="_blank" rel="noopener noreferrer" className="p-1 text-purple-400 hover:text-purple-300"><FileText/></a>}{userData.role !== 'staff' && userData.role !== 'team' && (<button onClick={() => handleDelete(t)} className="text-gray-500 hover:text-red-500 p-1"><Trash2 size={18}/></button>)}</div></div>
                     </div>
                  )) : (<div className="text-center py-20"><p className="text-gray-500">ยังไม่มีรายการ...</p><p className="text-gray-600">กดปุ่ม + เพื่อเพิ่มรายการแรกของคุณ</p></div>)}
             </div>
@@ -539,10 +599,10 @@ function DayDetailModal({ isOpen, onClose, user, date, showNotification }) {
         return unsub;
     }, [date, isOpen]);
     
-    const handleDelete = async (eventId) => {
+    const handleDelete = async (eventId, eventTitle) => {
         await deleteDoc(doc(db, `/artifacts/${appId}/public/data/events`, eventId));
         showNotification("ลบกิจกรรมแล้ว", "success");
-        await logAction(user, 'delete_event', { eventId });
+        await logAction(user, 'delete_event', { eventId, title: eventTitle });
     }
 
     return (
@@ -556,7 +616,7 @@ function DayDetailModal({ isOpen, onClose, user, date, showNotification }) {
                           <p className="text-sm text-gray-300">{event.description}</p>
                           <p className="text-xs text-gray-500 mt-1">เวลา: {event.time || "ไม่ระบุ"}</p>
                       </div>
-                      <button onClick={() => handleDelete(event.id)} className="text-gray-500 hover:text-red-400 flex-shrink-0"><Trash2 size={18}/></button>
+                      <button onClick={() => handleDelete(event.id, event.title)} className="text-gray-500 hover:text-red-400 flex-shrink-0"><Trash2 size={18}/></button>
                   </div>
               )) : <p className="text-gray-500 text-center py-8">ไม่มีกิจกรรมในวันนี้</p>}
           </div>
@@ -898,7 +958,7 @@ function AddUserModal({ isOpen, onClose, showNotification, owner }) {
         finally { setIsLoading(false); }
     };
     
-    return (<Modal isOpen={isOpen} onClose={onClose} title="เพิ่มผู้ใช้ใหม่"><form onSubmit={handleCreateUser} className="space-y-4"><input type="text" value={username} onChange={e => setUsername(e.target.value)} placeholder="ชื่อผู้ใช้ (สำหรับล็อกอิน)" required className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/><input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="ชื่อที่แสดง" required className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/><div className="relative"><input type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} placeholder="รหัสผ่าน" required className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/><button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute inset-y-0 right-0 px-3 text-gray-400">{showPassword ? <EyeOff/> : <Eye/>}</button></div><select value={role} onChange={e => setRole(e.target.value)} className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"><option value="staff">Staff</option><option value="admin">Admin</option></select><button type="submit" disabled={isLoading} className="w-full py-3 bg-purple-600 hover:bg-purple-700 rounded-lg disabled:bg-gray-500">{isLoading ? "กำลังสร้าง..." : "สร้างผู้ใช้"}</button></form></Modal>);
+    return (<Modal isOpen={isOpen} onClose={onClose} title="เพิ่มผู้ใช้ใหม่"><form onSubmit={handleCreateUser} className="space-y-4"><input type="text" value={username} onChange={e => setUsername(e.target.value)} placeholder="ชื่อผู้ใช้ (สำหรับล็อกอิน)" required className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/><input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="ชื่อที่แสดง" required className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/><div className="relative"><input type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} placeholder="รหัสผ่าน" required className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/><button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute inset-y-0 right-0 px-3 text-gray-400">{showPassword ? <EyeOff/> : <Eye/>}</button></div><select value={role} onChange={e => setRole(e.target.value)} className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"><option value="staff">Staff</option><option value="admin">Admin</option><option value="team">ทีมงาน</option></select><button type="submit" disabled={isLoading} className="w-full py-3 bg-purple-600 hover:bg-purple-700 rounded-lg disabled:bg-gray-500">{isLoading ? "กำลังสร้าง..." : "สร้างผู้ใช้"}</button></form></Modal>);
 }
 
 function EditUserModal({ isOpen, onClose, showNotification, owner, userToEdit }) {
@@ -920,7 +980,7 @@ function EditUserModal({ isOpen, onClose, showNotification, owner, userToEdit })
         finally { setIsLoading(false); }
     };
     
-    return (<Modal isOpen={isOpen} onClose={onClose} title={`แก้ไขผู้ใช้: ${userToEdit.username}`}><form onSubmit={handleUpdateUser} className="space-y-4"><input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="ชื่อที่แสดง" required className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/><input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="รหัสผ่านใหม่ (เว้นว่างไว้หากไม่ต้องการเปลี่ยน)" className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/><select value={role} onChange={e => setRole(e.target.value)} className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg" disabled={userToEdit.role === 'owner'}><option value="staff">Staff</option><option value="admin">Admin</option>{userToEdit.role === 'owner' && <option value="owner">Owner</option>}</select><button type="submit" disabled={isLoading} className="w-full py-3 bg-purple-600 hover:bg-purple-700 rounded-lg disabled:bg-gray-500">{isLoading ? "กำลังอัปเดต..." : "อัปเดตข้อมูล"}</button></form></Modal>);
+    return (<Modal isOpen={isOpen} onClose={onClose} title={`แก้ไขผู้ใช้: ${userToEdit.username}`}><form onSubmit={handleUpdateUser} className="space-y-4"><input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="ชื่อที่แสดง" required className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/><input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="รหัสผ่านใหม่ (เว้นว่างไว้หากไม่ต้องการเปลี่ยน)" className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg"/><select value={role} onChange={e => setRole(e.target.value)} className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg" disabled={userToEdit.role === 'owner'}><option value="staff">Staff</option><option value="admin">Admin</option><option value="team">ทีมงาน</option>{userToEdit.role === 'owner' && <option value="owner">Owner</option>}</select><button type="submit" disabled={isLoading} className="w-full py-3 bg-purple-600 hover:bg-purple-700 rounded-lg disabled:bg-gray-500">{isLoading ? "กำลังอัปเดต..." : "อัปเดตข้อมูล"}</button></form></Modal>);
 }
 
 function ProfilePage({ user, userData, showNotification, onProfileUpdate }) {
@@ -999,13 +1059,15 @@ function LogDetailView({ detailsString }) {
     try {
         const details = JSON.parse(detailsString);
         let output = [];
-        if(details.description) output.push(details.description)
+        if(details.description) output.push(details.description);
         if(details.category) output.push(`หมวดหมู่: ${details.category}`);
         if(details.amount) output.push(`(${formatCurrency(details.amount)})`);
+        if(details.type) output.push(details.type === 'income' ? '(รายรับ)' : '(รายจ่าย)');
 
         if(details.username) output.push(`ชื่อผู้ใช้: ${details.username}`);
         if(details.newRole) output.push(`-> ${details.newRole}`);
-        if(details.title) output.push(details.title)
+        if(details.title) output.push(details.title);
+        if(details.role) output.push(`สิทธิ์: ${details.role}`)
 
         if(output.length > 0) return output.join(' ');
 
